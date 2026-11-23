@@ -5,7 +5,7 @@ argument-hint: "[--full] [--security] [--perf] [--simple] [--conventions]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.3.1"
+  version: "4.3.2"
 ---
 
 # Review (Phase 3 + Phase 4)

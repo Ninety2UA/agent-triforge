@@ -4,7 +4,7 @@ description: "Use when a task completes and a future agent without a note would 
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "task completion (lease_collect); 6 (wrap-up)"
-  version: "4.3.1"
+  version: "4.3.2"
 ---
 
 # Knowledge Compounding

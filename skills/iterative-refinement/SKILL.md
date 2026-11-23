@@ -4,7 +4,7 @@ description: "Use when processing review findings after a build: triage, fix, di
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
-  version: "4.3.1"
+  version: "4.3.2"
 ---
 
 # Iterative Refinement

@@ -254,8 +254,9 @@ learnings_store_empty() {
 # delta_untracked_save <file>: write one "<digest> <path>" line per untracked
 # file (git ls-files --others --exclude-standard), sorted. The digest is the
 # file's git blob id (hash-object --no-filters, so no filter runs), "link:" and
-# the target for a symlink, or "unreadable". A newline in a name is written as
-# \n. An existing <file> is kept: a resumed Phase 5 compares against the list
+# the target for a symlink, or "unreadable:" with the size and modification time
+# of a file git cannot read. Tool caches (_delta_is_cache) are left out. A
+# newline in a name is written as \n. An existing <file> is kept: a resumed Phase 5 compares against the list
 # its first session saved. rc 0; 1 when git fails; 64 on a bad call.
 delta_untracked_save() {
   local OUT=${1:-}
@@ -306,18 +307,68 @@ delta_review_paths() {
 }
 
 # _delta_untracked_list: the sorted "<digest> <path>" lines, rc 1 when git fails.
+# Tool caches a test or lint run rewrites (_delta_is_cache) are left out, so a
+# Phase 5 test run alone never reads as a change. Regular readable files are
+# hashed in one git call (hash-object --stdin-paths); a name holding a newline,
+# which that list cannot carry, is hashed on its own, and when the batch call
+# fails every file is hashed on its own. A file git cannot read gets its size
+# and modification time (_delta_meta), so a change to it still shows.
 _delta_untracked_list() {
-  local Z P D K NL='
-' ESC='\n'
+  local Z W U H P D K RC=0 NL='
+' CR=$(printf '\r') ESC='\n'
   Z=$(mktemp "${TMPDIR:-/tmp}/delta-ls.XXXXXX") || return 1
-  _lgr ls-files -z --others --exclude-standard > "$Z" || { rm -f "$Z"; return 1; }
+  W="${Z}.batch"; U="${Z}.lines"
+  # Each step writes a file and its rc is checked; nothing rests on pipefail
+  # or set -e, which a caller's || turns off.
+  _lgr ls-files -z --others --exclude-standard > "$Z" && : > "$W" && : > "$U" || { rm -f "$Z" "$W" "$U"; return 1; }
   # read -d '' splits on NUL under bash 3.2 and zsh alike; the keys sort bytewise.
   while IFS= read -r -d '' P; do
+    if _delta_is_cache "$P"; then continue; fi
     if [ -L "$_LEASE_REPO/$P" ]; then D="link:$(readlink "$_LEASE_REPO/$P" | LC_ALL=C tr '\n ' '__')"
-    elif [ -f "$_LEASE_REPO/$P" ] && [ -r "$_LEASE_REPO/$P" ]; then D=$(_lgr hash-object --no-filters -- "$P" 2>/dev/null) || D=unreadable
-    else D=unreadable; fi
+    elif [ -f "$_LEASE_REPO/$P" ] && [ -r "$_LEASE_REPO/$P" ]; then
+      # --stdin-paths reads one name per line, drops a trailing CR and
+      # C-unquotes a line that starts with a double quote: such names go alone
+      case "$P" in
+        *"$NL"*|\"*|*"$CR"*) D=$(_lgr hash-object --no-filters -- "$P" 2>/dev/null) || D=$(_delta_meta "$P") ;;
+        *) printf '%s\n' "$P" >> "$W" || { RC=1; break; }; continue ;;
+      esac
+    else D=$(_delta_meta "$P"); fi
     K=${P//$NL/$ESC}
-    printf '%s %s\n' "$D" "$K"
-  done < "$Z" | LC_ALL=C sort
-  rm -f "$Z"
+    printf '%s %s\n' "$D" "$K" >> "$U" || { RC=1; break; }
+  done < "$Z"
+  if [ "$RC" -eq 0 ] && [ -s "$W" ]; then
+    if H=$(_lgr hash-object --no-filters --stdin-paths < "$W" 2>/dev/null) \
+      && [ "$(printf '%s\n' "$H" | LC_ALL=C grep -c '')" -eq "$(LC_ALL=C grep -c '' "$W")" ]; then
+      printf '%s\n' "$H" > "$Z.h" && paste -d ' ' "$Z.h" "$W" >> "$U" || RC=1
+      rm -f "$Z.h"
+    else
+      while IFS= read -r P; do
+        D=$(_lgr hash-object --no-filters -- "$P" 2>/dev/null) || D=$(_delta_meta "$P")
+        printf '%s %s\n' "$D" "$P" >> "$U" || { RC=1; break; }
+      done < "$W"
+    fi
+  fi
+  if [ "$RC" -eq 0 ]; then LC_ALL=C sort "$U" || RC=1; fi
+  rm -f "$Z" "$W" "$U"
+  return "$RC"
+}
+
+# _delta_is_cache <path>: rc 0 for a file a test, coverage or lint tool writes
+# as it runs (Python bytecode and caches, coverage data, JS tool caches,
+# .DS_Store), whether or not the project's .gitignore lists it.
+_delta_is_cache() {
+  case "/$1" in
+    */.coverage|*/.coverage.*|*/.DS_Store|*/.eslintcache|*.pyc|*/__pycache__/*|*/.pytest_cache/*|*/.mypy_cache/*|*/.ruff_cache/*|*/.hypothesis/*|*/.tox/*|*/.nox/*|*/.nyc_output/*|*/htmlcov/*|*/.turbo/*|*/.parcel-cache/*) return 0 ;;
+  esac
+  return 1
+}
+
+# _delta_meta <path>: "unreadable:<size>:<mtime>" for a file git cannot hash
+# (GNU stat, then BSD stat), "unreadable:?" when neither reads it.
+_delta_meta() {
+  local M=""
+  # GNU first: BSD stat rejects -c, while GNU reads -f as --file-system
+  M=$(stat -c '%s:%Y' "$_LEASE_REPO/$1" 2>/dev/null) || M=$(stat -f '%z:%m' "$_LEASE_REPO/$1" 2>/dev/null) || M=""
+  case "$M" in *[!0-9:]*|"") M="?" ;; esac
+  printf 'unreadable:%s\n' "$M"
 }

@@ -5,7 +5,7 @@ argument-hint: "<goal description> [--convergence fast|standard|deep] [--team]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.3.1"
+  version: "4.3.2"
 ---
 
 # Ship (autonomous sprint)

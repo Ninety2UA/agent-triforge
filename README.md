@@ -34,11 +34,14 @@ Every implementation task, the lead's own included, is built under a per-task le
 When the lead solves a problem whose reasoning would otherwise be lost, it writes a note to `ops/solutions/`, or to `ops/decisions/` for an architectural decision. The [`learnings-researcher`](personas/learnings-researcher.md) persona searches both before new work is planned ([the knowledge loop](docs/team-work.md#the-knowledge-loop-at-compound)).
 
 <a name="whats-new"></a>
-## What's new (v4.3.1)
+## What's new (v4.3.2)
 
-This release closes one gap in the agy builder lane. Nothing else changes in how you run Triforge.
+This release fixes four things found while testing 4.3.0 and 4.3.1. Nothing changes in how you run Triforge.
 
-- **The agy builder can no longer read credential files.** Since agy 1.5.7, a background agy session starts in Auto mode where the account has it, and from 1.5.14 Auto may read files outside the workspace without asking. agy's read lanes already refused the credential paths (`~/.ssh`, `~/.aws`, `~/.config/gh`, the CLIs' own sign-in folders and the rest of the list the other read-only lanes refuse). The builder lease passed no rules at all. Now it passes `--settings` with the same credential read denies and nothing else, so Auto still approves the builder's edits and safe commands in its worktree. An agy without `--settings` runs as before.
+- **Devin runs inside the command that started it.** From Devin 3000.13.4, a local session may run in a background daemon that outlives the command. Triforge now passes `--process-model in-process` on Devin 3000.13.4 and later, so the env allowlist, the per-run config copy and the time limit bound the agent itself. Both config copies also turn off Devin's `.kiro` and Codex config imports, which Devin turns on by default.
+- **A test run alone no longer asks for a delta review.** The Phase 5 trigger in `at-ship` and `at-coordinate` leaves out the files test, coverage and lint tools rewrite (`.coverage`, `__pycache__`, `.pytest_cache` and the like). A change to an untracked file the lead cannot read now shows. New files are hashed in one git call instead of one call per file.
+- **Gemini 4 models fall back in launch order.** On an account that lacks Gemini 4 Neon, each agy call runs Hydrogen, then Carbon, then Argon (newest launch first), else Gemini 3.8 Flash. Before, Argon came ahead of Carbon. The probe's model-list row reads (XHigh) and names the newest family by launch, not by name.
+- **The changelog's old README links land on the right heading.** Eight links in the v3.0.0, v3.3.0 and v4.0.0 notes pointed at a README section those versions did not have. They now point at each version's own Compatibility, Command map, Upgrading from 3.x and Rolling back to 3.3.3 headings.
 
 ---
 
@@ -141,6 +144,7 @@ Each version's full notes are one file in [`docs/releases/`](docs/releases/), an
 
 | Version | Date | Summary |
 |---|---|---|
+| [v4.3.2](docs/releases/v4.3.2.md) | 2026-11-23 | Devin runs in-process, a test run no longer asks for a delta review, Gemini 4 in launch order |
 | [v4.3.1](docs/releases/v4.3.1.md) | 2026-11-23 | The agy builder can no longer read credential files |
 | [v4.3.0](docs/releases/v4.3.0.md) | 2026-11-23 | Review covers what ships, a 2.1.325 worker floor, unattended runs that rule and continue, current models |
 | [v4.2.0](docs/releases/v4.2.0.md) | 2026-11-05 | Today's CLIs read correctly, a Coverage line in every review lane, fail-closed verdicts, a 2.1.314 worker floor |

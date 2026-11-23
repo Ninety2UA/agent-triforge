@@ -47,7 +47,9 @@ fi
 # .cursor, .windsurf hooks, MCP servers and skills; .windsurf/hooks.json ran
 # with windsurf on and did not with it off, measured). agents_standard does
 # not govern skills: .agents/skills, .devin/skills and ~/.agents/skills load
-# with it off too.
+# with it off too. kiro and codex (Devin 3000.13.4 imports .kiro/skills and
+# ~/.kiro/skills, and Codex config, by default) are off too; measured on
+# 3000.14.30821: a .kiro/skills skill listed without the key and not with it.
 # A project's own .devin/ and .cognition/ files still merge over the copy
 # (permissions, hooks, MCP servers, required plugins), so a read-class run
 # first passes _devin_project_guard.
@@ -119,17 +121,39 @@ _DEVIN_READ_XDG=/dev/null/triforge-devin-read
 # command line up to the prompt: for the read class `env XDG_CONFIG_HOME=`
 # _DEVIN_READ_XDG first, then devin with the per-run config copy, the model
 # pin, the class's --permission-mode (_devin_mode), workspace trust off (-p
-# fails in an untrusted directory) and -p last. The edit class sets no
+# fails in an untrusted directory), --process-model in-process on a Devin that
+# has it (_devin_has_process_model) and -p last. The edit class sets no
 # XDG_CONFIG_HOME: both lanes run under _adapter_env devin, whose allowlist
 # never passes the lead's, so Devin and the project's own commands in its
 # tool shell use the default ~/.config (Devin's MCP servers, skills and
 # subagent profiles under ~/.config/devin included). The one composer:
 # invoke_devin and _lease_lane_argv (scripts/lib/lease-wait.sh) both call it.
 _devin_argv() {
-  _DEVIN_ARGV=(devin --config "$2" --model "$3" --permission-mode "$(_devin_mode "$1")" --respect-workspace-trust false -p)
+  _DEVIN_ARGV=(devin --config "$2" --model "$3" --permission-mode "$(_devin_mode "$1")" --respect-workspace-trust false)
+  if _devin_has_process_model; then _DEVIN_ARGV+=(--process-model in-process); fi
+  _DEVIN_ARGV+=(-p)
   if [ "${1:-}" != edit ]; then
     _DEVIN_ARGV=(env "XDG_CONFIG_HOME=${_DEVIN_READ_XDG}" "${_DEVIN_ARGV[@]}")
   fi
+}
+
+# _devin_has_process_model: rc 0 when the installed devin is 3000.13.4 or later,
+# where local sessions may run in a background daemon that outlives the client
+# and --process-model exists. in-process keeps the agent inside the command the
+# lane started, so _adapter_env's allowlist, the config copy and timeout -k
+# bound the agent itself, not only a client attached to a daemon (a user's own
+# daemon, or process_model = "daemon", included). Read from `devin --version`
+# on each call (no cache, so a PATH change or a slow first answer never
+# sticks); anything unparseable is the old Devin (no flag).
+_devin_has_process_model() {
+  local OUT=""
+  OUT=$(_run_with_timeout 10 devin --version < /dev/null 2>/dev/null) || OUT=""
+  printf '%s\n' "$OUT" | awk '
+    /^devin [0-9]+\.[0-9]+\.[0-9]+/ && !seen {
+      seen = 1; split($2, v, ".")
+      ok = (v[1] + 0 > 3000) || (v[1] + 0 == 3000 && v[2] + 0 > 13) || (v[1] + 0 == 3000 && v[2] + 0 == 13 && v[3] + 0 >= 4)
+    }
+    END { exit !ok }'
 }
 
 # _devin_config_copy <read|edit> <dest> — copy the shipped per-class config to

@@ -300,7 +300,7 @@ _cur_grok_pick() {
 _agy_pick() {
   local EVERY ALL VER
   AGY_PIN=""; AGY_PRO=""; AGY_NEWEST=""
-  EVERY=$(grep -oE 'Gemini [0-9][0-9.]* [A-Z][A-Za-z0-9]* \((Low|Medium|High)\)' "$1" 2>/dev/null | sort -u || true)
+  EVERY=$(grep -oE 'Gemini [0-9][0-9.]* [A-Z][A-Za-z0-9]* \((Low|Medium|High|XHigh)\)' "$1" 2>/dev/null | sort -u || true)
   ALL=$(printf '%s\n' "$EVERY" | grep -E '^Gemini [0-9.]+ (Pro|Flash) ' || true)
   VER=$(printf '%s\n' "$ALL" | sed -E 's/^Gemini ([0-9][0-9.]*) .*/\1/' | grep -E '^[0-9]' | sort -V | tail -1 || true)
   if [ -n "$VER" ]; then
@@ -312,13 +312,19 @@ _agy_pick() {
   [ -n "$AGY_PRO" ] || AGY_PRO=$(printf '%s\n' "$ALL" | grep -E ' Pro ' | sort -V | tail -1 || true)
   VER=$(printf '%s\n' "$EVERY" | sed -E 's/^Gemini ([0-9][0-9.]*) .*/\1/' | grep -E '^[0-9]' | sort -V | tail -1 || true)
   if [ -n "$VER" ]; then
-    case "$AGY_PIN" in
-      "Gemini ${VER} "*) AGY_NEWEST=$AGY_PIN ;;
-      *)
-        AGY_NEWEST=$(printf '%s\n' "$EVERY" | grep -F "Gemini ${VER} " | grep -F '(High)' | head -1 || true)
-        [ -n "$AGY_NEWEST" ] || AGY_NEWEST=$(printf '%s\n' "$EVERY" | grep -F "Gemini ${VER} " | head -1 || true)
-        ;;
-    esac
+    # families at the newest number by launch, never by name: a family
+    # this list does not know is newer than every one it does (it came
+    # out after the list was written), then Neon, Hydrogen, Carbon, Argon
+    # (2026-11-18, -11-12, -11-10, -10-13), then Pro and Flash
+    local FAMS F
+    FAMS=$(printf '%s\n' "$EVERY" | grep -F "Gemini ${VER} " | sed -E 's/^Gemini [0-9.]+ ([A-Za-z0-9]+) .*/\1/' | sort -u || true)
+    for F in $(printf '%s\n' "$FAMS" | grep -v -x -E 'Neon|Hydrogen|Carbon|Argon|Pro|Flash' || true) Neon Hydrogen Carbon Argon Pro Flash; do
+      printf '%s\n' "$FAMS" | grep -qx -- "$F" || continue
+      AGY_NEWEST=$(printf '%s\n' "$EVERY" | grep -F "Gemini ${VER} ${F} (High)" | head -1 || true)
+      [ -n "$AGY_NEWEST" ] || AGY_NEWEST=$(printf '%s\n' "$EVERY" | grep -F "Gemini ${VER} ${F} " | head -1 || true)
+      break
+    done
+    [ -n "$AGY_NEWEST" ] || AGY_NEWEST=$(printf '%s\n' "$EVERY" | grep -F "Gemini ${VER} " | head -1 || true)
   fi
 }
 
@@ -1229,7 +1235,7 @@ if command -v agy >/dev/null 2>&1; then
     # listed, else the next Gemini 4 family listed at (High), else the
     # every-plan fallback _agy_pick found
     AGY_SHIPPED_ON="not listed (lanes fall back)"
-    for AGY_C in "$AGY_SHIPPED" "Gemini 4 Hydrogen (High)" "Gemini 4 Argon (High)" "Gemini 4 Carbon (High)"; do
+    for AGY_C in "$AGY_SHIPPED" "Gemini 4 Hydrogen (High)" "Gemini 4 Carbon (High)" "Gemini 4 Argon (High)"; do
       if grep -qF "$AGY_C" "$O"; then
         AGY_PIN="$AGY_C"
         [ "$AGY_C" = "$AGY_SHIPPED" ] && AGY_SHIPPED_ON="listed"

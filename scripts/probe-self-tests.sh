@@ -9760,6 +9760,26 @@ _S24_FAIL="${_S24_FAIL}$(_self_expect env "$O" '^env:shell=0:fallback=0:marker=1
 _S24_FAIL="${_S24_FAIL}$(_self_expect lane "$O" "^lane-edit:devin --config ${_S24}/x.devin.edit.json --model swe-1-6-slow --permission-mode dangerous --respect-workspace-trust false -p\$" "^lane-read:env XDG_CONFIG_HOME=/dev/null/triforge-devin-read devin --config ${_S24}/x.devin.read.json --model swe-1-6-slow --permission-mode auto --respect-workspace-trust false -p\$")"
 _S24_FAIL="${_S24_FAIL}$(_self_expect cred "$O" '^cred:read=true:sandbox=true$')"
 
+# process model and imports: a devin at 3000.13.4 or later gets
+# --process-model in-process before -p (its sessions may otherwise run in a
+# daemon the lane's env, config copy and timeout do not bound); an older or
+# unparseable version gets none; both shipped config copies turn the kiro and
+# codex imports off
+O=$( for _S24_V in 3000.13.3 3000.13.4 3000.14.30821 3001.0.0 garbage; do
+    mkdir -p "$_S24/pm-$_S24_V"
+    printf '#!/bin/sh\necho "devin %s (stub)"\n' "$_S24_V" > "$_S24/pm-$_S24_V/devin"; chmod +x "$_S24/pm-$_S24_V/devin"
+    ( export PATH="$_S24/pm-$_S24_V:$_S24_PATH" TMPDIR="$_S24/tmp" && source "${_SELF_DIR}/invoke-external.sh" >/dev/null 2>&1 || { echo "pm-$_S24_V:load-failed"; exit 0; }
+      _devin_argv read "$_S24/c.json" swe-2-flash-medium
+      A="${_DEVIN_ARGV[*]}"
+      echo "pm-$_S24_V:flag=$(printf '%s\n' "${_DEVIN_ARGV[@]}" | grep -cx -- '--process-model' || true):in=$(printf '%s\n' "${_DEVIN_ARGV[@]}" | grep -cx -- 'in-process' || true):plast=$( [ "${A% -p}" != "$A" ] && echo yes || echo no )" )
+  done
+  for _S24_K in read edit; do
+    python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["read_config_from"]; print("imports-%s:kiro=%s:codex=%s" % (sys.argv[2], r.get("kiro"), r.get("codex")))' "${REPO_ROOT}/devin-agents/config-${_S24_K}.json" "$_S24_K" 2>/dev/null || echo "imports-${_S24_K}:unreadable"
+  done )
+_S24_FAIL="${_S24_FAIL}$(_self_expect process-model "$O" '^pm-3000\.13\.3:flag=0:in=0:plast=yes$' '^pm-3000\.13\.4:flag=1:in=1:plast=yes$' \
+  '^pm-3000\.14\.30821:flag=1:in=1:plast=yes$' '^pm-3001\.0\.0:flag=1:in=1:plast=yes$' '^pm-garbage:flag=0:in=0:plast=yes$' \
+  '^imports-read:kiro=False:codex=False$' '^imports-edit:kiro=False:codex=False$')"
+
 # invoke_devin through the stub
 _S24_SHIP=$(cksum < "${REPO_ROOT}/devin-agents/config-read.json" 2>/dev/null || echo none)
 _S24_SIG=$(awk '/^---[[:space:]]*$/{skip++; next} skip>=2 && NF {print; exit}' "${REPO_ROOT}/devin-agents/reviewer.md" 2>/dev/null || true)
@@ -9972,7 +9992,7 @@ _S24_FAIL="${_S24_FAIL}$(_self_expect role-dispatch "$O" '^role-lease:builder=de
 
 _S24_CAP="Devin CLI as an optional member: readiness read from auth-status text, a read config with no command allowed, recorded consent and the builder opt-in at load, in the writers and at dispatch, no headless enrollment, the re-import flag setup reads, the lease allowlist on both lanes, the lane argv per class, invoke_devin on a config copy with the Status line as completion, the builder arm's class, copy removal and compose failure, a project's widening .devin/ and .cognition/ files, required plugins and unknown keys refused on both lanes, the role rule at dispatch (a builder lease after its opt-in was dropped, invoke_devin builder), the read class's XDG_CONFIG_HOME, a reviewer lease to review, ~/.local/share/devin closed to a claude worker (R24, R25)"
 if [ -z "$_S24_FAIL" ]; then
-  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; read config: no allow, exec and Write(**) denied; member writes: opt-in drop refused rc 2 (roster unchanged), a decline keeps all five roles resolving (builder -> claude); consent at dispatch: invoke_devin rc 5 with the stub never run, lease_dispatch rc 5 with the row still leased; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, the allowlist as its whole env (no planted secret), Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; retry: after the first attempt revoked the consent, dropped the builder opt-in or added .devin/hooks.json -> refused (rc 5 consent, rc 5 role, rc 1 project-config), the stub run once; an interrupted run (exit 130) -> rc 130 interrupted, run once; builder arm: read class off the argv and the logged command line, copy removed, a missing copy rc 94 deterministic (not 'not integrated'); project .devin/: a Fetch allow -> invoke_devin rc 1 deterministic project-config naming the file with the stub never run, the lease lane's read class a compose failure naming it, the edit class composing, hooks.v1.json, mcp_config.local.json, a read_config_from import and a symlinked config.json refused, a JSONC deny-only config passing, the builder arm on a hooks config rc 94 deterministic with the stub never run and the copy removed; requiredPlugins, an unknown key (config, permissions, MCP file), hooks.json in any case, any other JSON file and .cognition/ (allow, hooks.v1.json, mcp_config.local.json, symlink) refused naming the file, optional and forbidden plugin lists and non-JSON entries passing, invoke_devin from a .cognition allow rc 1 with the stub never run, the lane's read class a compose failure on requiredPlugins; role rule: devin builder without the opt-in, devin tester and a declined member rc 5 naming the role and at-setup, reviewer, a persona name and codex builder 0; a builder lease whose opt-in was dropped after lease_create -> lease_dispatch rc 5, row leased, seam never run; invoke_devin builder rc 5 reason role without the opt-in, dangerous mode with it; read class behind XDG_CONFIG_HOME=/dev/null/triforge-devin-read (lane argv, invoke env, builder log), edit class without it; seam reviewer lease -> review, a read config copy during the run and none after; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
+  row "SELF-24" "devin" "$_S24_CAP" "PASS" "auth: Not logged in. rc 0 -> auth-failed, Logged in (via Devin). -> ok; consent: missing -> rc 5, chain with no member table -> rc 5, recorded -> reviewer=devin; opt-in: builder primary or fallback without it -> rc 5, with it -> builder=devin, tester never; writers: role write refused without the opt-in (roster unchanged), member write refused without --consent, consent recorded via=test and kept across a model change, opt-in tester refused, decline drops both; read config: no allow, exec and Write(**) denied; member writes: opt-in drop refused rc 2 (roster unchanged), a decline keeps all five roles resolving (builder -> claude); consent at dispatch: invoke_devin rc 5 with the stub never run, lease_dispatch rc 5 with the row still leased; headless enroll rc 20, no table; re-import flag yes/no/unknown from the DVN-04 row; env: no SHELL, no DEVIN_REFUSAL_FALLBACK, worker marker; lane: dangerous for .edit.json, auto for .read.json, -p last; process model: --process-model in-process before -p from Devin 3000.13.4 (3000.13.4, 3000.14.30821, 3001.0.0), none for 3000.13.3 or an unparseable version; both config copies turn the kiro and codex imports off; invoke: config copy (shipped file unchanged, copy removed), auto, the pin, reviewer brief, the allowlist as its whole env (no planted secret), Status: DONE rc 0, no Status rc 80, empty nonzero, auth and plan deterministic; retry: after the first attempt revoked the consent, dropped the builder opt-in or added .devin/hooks.json -> refused (rc 5 consent, rc 5 role, rc 1 project-config), the stub run once; an interrupted run (exit 130) -> rc 130 interrupted, run once; builder arm: read class off the argv and the logged command line, copy removed, a missing copy rc 94 deterministic (not 'not integrated'); project .devin/: a Fetch allow -> invoke_devin rc 1 deterministic project-config naming the file with the stub never run, the lease lane's read class a compose failure naming it, the edit class composing, hooks.v1.json, mcp_config.local.json, a read_config_from import and a symlinked config.json refused, a JSONC deny-only config passing, the builder arm on a hooks config rc 94 deterministic with the stub never run and the copy removed; requiredPlugins, an unknown key (config, permissions, MCP file), hooks.json in any case, any other JSON file and .cognition/ (allow, hooks.v1.json, mcp_config.local.json, symlink) refused naming the file, optional and forbidden plugin lists and non-JSON entries passing, invoke_devin from a .cognition allow rc 1 with the stub never run, the lane's read class a compose failure on requiredPlugins; role rule: devin builder without the opt-in, devin tester and a declined member rc 5 naming the role and at-setup, reviewer, a persona name and codex builder 0; a builder lease whose opt-in was dropped after lease_create -> lease_dispatch rc 5, row leased, seam never run; invoke_devin builder rc 5 reason role without the opt-in, dangerous mode with it; read class behind XDG_CONFIG_HOME=/dev/null/triforge-devin-read (lane argv, invoke env, builder log), edit class without it; seam reviewer lease -> review, a read config copy during the run and none after; claude lane denies ~/.local/share/devin (Read + sandbox)" "static"
 else
   row "SELF-24" "devin" "$_S24_CAP" "FAIL" "mismatch in $(_self_fail_cases "$_S24_FAIL"):$(printf '%s' "$_S24_FAIL" | cut -c1-700)" "static"
 fi
@@ -11610,6 +11630,9 @@ _S26_FAIL="${_S26_FAIL}$(_self_expect coverage-unit "$O" '^cov-unit:plain=comple
 # nothing; a new test, a changed and a removed untracked file, a tracked edit
 # and a tracked file moved into ops/archive/ print, bookkeeping does not;
 # names with a space, a leading dash and a newline and a symlink are listed; no list counts untracked paths outside dot directories; a
+# rewritten .coverage and a new __pycache__ file never count, a new non-cache
+# dot file does, a change to a file git cannot read shows, and a name
+# starting with a double quote beside its unquoted twin is hashed as itself; a
 # snapshot naming no commit is rc 3; a broken git is rc 1, never no change.
 cat > "$_S26/delta.sh" <<'S26DELTA'
 set -euo pipefail
@@ -11618,10 +11641,12 @@ git init -q -b main && git config user.email p@x && git config user.name p
 mkdir -p ops && echo a > a.py && echo b > b.py && echo t > ops/TASKS.md && git add -A && git commit -qm i
 SNAP=$(git rev-parse HEAD); L="ops/archive/phase5-untracked-$SNAP.txt"
 mkdir -p .agents && echo boot > .agents/x && echo old > old.py && printf 'n' > 'sp ace.py' && printf 'z' > "$(printf 'nl\nname.py')" && printf 'q' > ./-dash.py && ln -s /etc/hosts lnk
+echo c1 > .coverage && printf 'u' > locked.bin && chmod 000 locked.bin && printf 'q' > '"qq.py' && printf 'q' > qq.py
 . "$S26_ROOT/scripts/invoke-external.sh" >/dev/null 2>&1
 RC=0; delta_untracked_save "$L" || RC=$?; printf '%s\n' "delta:save=${RC}:lines=$(grep -c '' "$L")"
 printf '%s\n' "delta:unchanged=[$(delta_review_paths "$SNAP" "$L" | paste -sd'|' -)]"
 echo again > old.py; echo new > t_new.py; rm 'sp ace.py'; echo x >> b.py; echo s > ops/STATE.md; git mv a.py ops/archive/a.py
+echo c2 > .coverage; mkdir -p __pycache__ && echo b > __pycache__/m.pyc; echo '{}' > .eslintrc.json; chmod 600 locked.bin; printf 'uu' > locked.bin; chmod 000 locked.bin; printf 'qq' > '"qq.py'
 delta_untracked_save "$L"; printf '%s\n' "delta:kept=$(grep -c 't_new' "$L" || true)"
 printf '%s\n' "delta:changed=[$(delta_review_paths "$SNAP" "$L" | paste -sd'|' -)]"
 printf '%s\n' "delta:nolist=[$(delta_review_paths "$SNAP" ops/archive/none.txt | paste -sd'|' -)]"
@@ -11631,9 +11656,10 @@ S26DELTA
 for _s26_dsh in /bin/bash $(command -v zsh 2>/dev/null || true); do
   rm -rf "$_S26/dl" && mkdir -p "$_S26/dl" "$_S26/tmp-dl"
   O=$(env HOME="$_S26/home" TMPDIR="$_S26/tmp-dl" TRIFORGE_LEASE_ROOT="$_S26/leases-dl" S26_ROOT="$REPO_ROOT" "$_s26_dsh" "$_S26/delta.sh" "$_S26/dl" 2>&1 || true)
-  _S26_FAIL="${_S26_FAIL}$(_self_expect "delta-${_s26_dsh##*/}" "$O" '^delta:save=0:lines=6$' '^delta:unchanged=\[\]$' '^delta:kept=0$' \
-    '^delta:changed=\[a\.py\|b\.py\|old\.py\|sp ace\.py\|t_new\.py\]$' \
-    '^delta:nolist=\[-dash\.py\|a\.py\|b\.py\|lnk\|nl\\nname\.py\|old\.py\|t_new\.py\]$' '^delta:badsnap=3$' '^delta:brokengit=1$')"
+  chmod -R u+rw "$_S26/dl" 2>/dev/null || true
+  _S26_FAIL="${_S26_FAIL}$(_self_expect "delta-${_s26_dsh##*/}" "$O" '^delta:save=0:lines=9$' '^delta:unchanged=\[\]$' '^delta:kept=0$' \
+    '^delta:changed=\["qq\.py\|\.eslintrc\.json\|a\.py\|b\.py\|locked\.bin\|old\.py\|sp ace\.py\|t_new\.py\]$' \
+    '^delta:nolist=\["qq\.py\|-dash\.py\|a\.py\|b\.py\|lnk\|locked\.bin\|nl\\nname\.py\|old\.py\|qq\.py\|t_new\.py\]$' '^delta:badsnap=3$' '^delta:brokengit=1$')"
 done
 
 # gap-rerun: a lane short of complete coverage re-runs inside its cycle.
@@ -16193,7 +16219,9 @@ mkdir -p "$_S29"
 #            scripts/probe-capabilities.sh) on a stub `agy models`: Argon and
 #            Flash listed -> pin Flash (High), newest Argon (High), no Pro; a
 #            newer Pro -> the pin and the newest are that Pro; Flash alone ->
-#            the newest is the pin
+#            the newest is the pin; the newest Gemini 4 family by launch (an
+#            unknown family, then Neon, Hydrogen, Carbon, Argon), never by
+#            name, and an (XHigh) line read
 #   occontrol the positive control OC-06 and OC-06b stand on
 #            (_oc_control_gate, taken from the same file) on a stub opencode:
 #            one that runs the allowed touch -> rc 0, no row; one that doesn't
@@ -16463,10 +16491,17 @@ _S29_FLASH2=$(printf 'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)')
 _S29_OTHER=$(printf 'claude-opus-5-5-high\tClaude Opus 5.5 (High)')
 O="$(_s29_agymodels argon "$_S29_ARGON1" "$_S29_ARGON2" "$_S29_FLASH1" "$_S29_FLASH2" "$_S29_OTHER")
 $(_s29_agymodels newerpro "$_S29_ARGON2" "$_S29_FLASH1" "$(printf 'x\tGemini 5 Pro (High)')")
-$(_s29_agymodels flash "$_S29_FLASH2" "$_S29_FLASH1" "$_S29_OTHER")"
+$(_s29_agymodels flash "$_S29_FLASH2" "$_S29_FLASH1" "$_S29_OTHER")
+$(_s29_agymodels launch "$_S29_ARGON2" "$(printf 'x\tGemini 4 Hydrogen (High)')" "$(printf 'x\tGemini 4 Neon (XHigh)')" "$(printf 'x\tGemini 4 Neon (High)')" "$_S29_FLASH1")
+$(_s29_agymodels unknown "$_S29_ARGON2" "$(printf 'x\tGemini 4 Neon (High)')" "$(printf 'x\tGemini 4 Zinc (High)')" "$_S29_FLASH1")
+$(_s29_agymodels xhigh-only "$_S29_ARGON2" "$(printf 'x\tGemini 4 Neon (XHigh)')" "$_S29_FLASH1")
+$(_s29_agymodels flash4 "$(printf 'x\tGemini 4 Flash (High)')" "$(printf 'x\tGemini 4 Neon (High)')" "$_S29_FLASH1")"
 _S29_FAIL="${_S29_FAIL}$(_self_expect agymodels "$O" '^argon:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 4 Argon \(High\)$' \
-  '^newerpro:pin=Gemini 5 Pro \(High\):pro=Gemini 5 Pro \(High\):newest=Gemini 5 Pro \(High\)$' '^flash:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 3\.8 Flash \(High\)$')"
-_S29_EV="${_S29_EV}agymodels: _agy_pick on a stub agy models: Argon and Flash -> pin Flash (High), newest Argon (High); a newer Pro -> pinned; Flash alone -> the newest is the pin. "
+  '^newerpro:pin=Gemini 5 Pro \(High\):pro=Gemini 5 Pro \(High\):newest=Gemini 5 Pro \(High\)$' '^flash:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 3\.8 Flash \(High\)$' \
+  '^launch:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 4 Neon \(High\)$' '^unknown:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 4 Zinc \(High\)$' \
+  '^xhigh-only:pin=Gemini 3\.8 Flash \(High\):pro=:newest=Gemini 4 Neon \(XHigh\)$' \
+  '^flash4:pin=Gemini 4 Flash \(High\):pro=:newest=Gemini 4 Neon \(High\)$')"
+_S29_EV="${_S29_EV}agymodels: _agy_pick on a stub agy models: Argon and Flash -> pin Flash (High), newest Argon (High); a newer Pro -> pinned; Flash alone -> the newest is the pin; families by launch, never by name: Neon over Hydrogen and Argon, a family the list does not know over Neon, an XHigh-only Neon read, and a Gemini 4 Flash pin beside Neon still names Neon newest. "
 
 # agyaccount
 # _s29_acct <label> <model> — _agy_model_for_account against the stub listing in
@@ -16522,6 +16557,52 @@ $(_s29_acct nolines "Gemini 4 Neon (High)")"
 : > "$_S29/cfg/models-fail"
 O="$O
 $(_s29_acct fail "Gemini 4 Neon (High)")"
+# captured: `agy models` as agy 1.5.14 printed it on a Google AI Pro account
+# (the Mini, 2026-11-23; tab-separated slug and display name, Orchestrator
+# rows included). As captured, Neon is kept; with the Neon rows removed the
+# next family by launch, Hydrogen, runs; on an Ultra-shaped listing holding
+# Carbon and Argon but neither Neon nor Hydrogen, Carbon (2026-11-10) runs
+# before Argon (2026-10-13)
+rm -f "$_S29/cfg/models-fail"
+cat > "$_S29/cfg/models-captured" <<'S29_AGYMODELS_EOF'
+gemini-4-neon-high	Gemini 4 Neon (High)
+gemini-4-neon-xhigh	Gemini 4 Neon (XHigh)
+gemini-4-neon-medium	Gemini 4 Neon (Medium)
+gemini-4-neon-low	Gemini 4 Neon (Low)
+gemini-4-argon-medium	Gemini 4 Argon (Medium)
+gemini-4-argon-high	Gemini 4 Argon (High)
+gemini-4-argon-low	Gemini 4 Argon (Low)
+gemini-4-hydrogen-high	Gemini 4 Hydrogen (High)
+gemini-4-hydrogen-xhigh	Gemini 4 Hydrogen (XHigh)
+gemini-4-hydrogen-medium	Gemini 4 Hydrogen (Medium)
+gemini-4-hydrogen-low	Gemini 4 Hydrogen (Low)
+gemini-pro-orchestrator-neon	Orchestrator (Neon)
+gemini-pro-orchestrator-g1-pro	Orchestrator (Argon)
+gemini-3.8-flash-high	Gemini 3.8 Flash (High)
+gemini-3.8-flash-medium	Gemini 3.8 Flash (Medium)
+gemini-3.8-flash-low	Gemini 3.8 Flash (Low)
+claude-opus-5-5-low	Claude Opus 5.5 (Low)
+claude-opus-5-5-medium	Claude Opus 5.5 (Medium)
+claude-opus-5-5-high	Claude Opus 5.5 (High)
+claude-sonnet-5-5-low	Claude Sonnet 5.5 (Low)
+claude-sonnet-5-5-medium	Claude Sonnet 5.5 (Medium)
+claude-sonnet-5-5-high	Claude Sonnet 5.5 (High)
+gpt-oss-120b-medium	GPT-OSS 120B (Medium)
+S29_AGYMODELS_EOF
+cp "$_S29/cfg/models-captured" "$_S29/cfg/models"
+OC="$(_s29_acct captured "Gemini 4 Neon (High)")
+$(_s29_acct captured-xhigh "Gemini 4 Neon (XHigh)")"
+grep -v 'Gemini 4 Neon' "$_S29/cfg/models-captured" > "$_S29/cfg/models"
+OC="$OC
+$(_s29_acct captured-noneon "Gemini 4 Neon (High)")
+$(_s29_acct captured-noneon-xhigh "Gemini 4 Neon (XHigh)")"
+{ grep -v -E 'Gemini 4 (Neon|Hydrogen)' "$_S29/cfg/models-captured"; printf 'gemini-4-carbon-high\tGemini 4 Carbon (High)\n'; } > "$_S29/cfg/models"
+OC="$OC
+$(_s29_acct launch-order "Gemini 4 Neon (High)")"
+_S29_FAIL="${_S29_FAIL}$(_self_expect agycaptured "$OC" '^captured:out=Gemini 4 Neon \(High\):read=1:note=0$' \
+  '^captured-xhigh:out=Gemini 4 Neon \(XHigh\):read=1:note=0$' '^captured-noneon:out=Gemini 4 Hydrogen \(High\):read=1:note=1$' \
+  '^captured-noneon-xhigh:out=Gemini 4 Hydrogen \(XHigh\):read=1:note=1$' '^launch-order:out=Gemini 4 Carbon \(High\):read=1:note=1$')"
+_S29_EV="${_S29_EV}agycaptured: on agy 1.5.14's captured Pro listing Neon (High) and (XHigh) are kept; without the Neon rows Hydrogen runs at the same level; with Carbon and Argon but no Neon or Hydrogen, Carbon (launched later) runs before Argon. "
 rm -f "$_S29/cfg/models-fail" "$_S29/cfg/models"
 mkdir -p "$_S29/agyw/ops"
 ( cd "$_S29/agyw" && git init -q . ) >/dev/null 2>&1 || true

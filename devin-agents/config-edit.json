@@ -10,7 +10,9 @@
     "windsurf": false,
     "copilot": false,
     "opencode": false,
-    "zed": false
+    "zed": false,
+    "kiro": false,
+    "codex": false
   },
   "subagents_enabled": false,
   "attribution": false,
