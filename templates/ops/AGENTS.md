@@ -15,7 +15,7 @@ Roles come from `ops/roster.toml`: builder, reviewer, tester, analyst and docume
 - Any roster member can build. Every implementation task runs under a per-task lease in an isolated worktree and merges only after cross-review by a pinned reviewer who is not the builder; no agent reviews or merges its own build.
 - Builders under a lease work only inside their worktree and never read or write the canonical `ops/` tree — the lead injects the context (TASKS.md rows, CONTRACTS.md slice, roster entry) at dispatch and applies `ops/` changes at collect/merge. Commit nothing; the lead collects.
 - The lead reads TASKS.md, MEMORY.md, CHANGELOG.md and CONTRACTS.md before acting and updates CHANGELOG.md after; each merged task's row carries builder, reviewer and merge commit from the lease ledger.
-- Stay within your assigned scope (a builder's scope is its worktree); propose cross-scope changes in MEMORY.md first.
+- Stay within your assigned scope (a builder's scope is its worktree); propose cross-scope changes in MEMORY.md first (a builder puts the proposal in its report, and the lead records it).
 - Never modify CONTRACTS.md directly — propose changes in MEMORY.md first. All code conforms to the type definitions in CONTRACTS.md.
 - A conflict with another agent's work is logged in TASKS.md.
 - Attribution is mandatory on every change.

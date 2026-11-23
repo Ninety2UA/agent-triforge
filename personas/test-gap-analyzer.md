@@ -89,4 +89,4 @@ For each critical path — every security-critical and business-critical functio
 - Focus on what's MISSING, not what's present
 - Prioritize by risk (security > business logic > utilities)
 - Be specific about which edge cases are missing
-- Do not write tests yourself — only identify gaps for Codex to fill
+- Do not write tests yourself — only identify gaps for the roster's tester role to fill

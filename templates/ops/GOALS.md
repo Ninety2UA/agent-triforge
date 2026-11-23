@@ -1,7 +1,7 @@
 # Project goals
 
 <!-- High-level product goals that guide sprint planning. -->
-<!-- Claude reads this file during Phase 1 planning to decompose goals into tasks. -->
+<!-- The lead reads this file during Phase 1 planning to decompose goals into tasks. -->
 
 ## Active goals
 

@@ -108,7 +108,7 @@ Offer the shipped default first (recommended):
 | opencode | `openrouter/z-ai/glm-5.3` | `opencode models openrouter` | needs the openrouter provider connected (`OPENROUTER_API_KEY` or `opencode auth login`) |
 | kimi | `kimi-code/k3` | (no list flag) | the OAuth-managed alias; `kimi login` provisions it; offer the default |
 | cursor | `grok-4.7-xhigh` | `cursor-agent --list-models` (or `agent --list-models` when only the new binary name exists) | pin the suffixed Grok id explicitly, never the Auto router; effort rides in the `-low`, `-medium`, `-high`, `-xhigh` suffix. An unrelated `~/.grok/bin/agent` can shadow `agent`, so the helper (`_cursor_bin`) resolves `cursor-agent` first and accepts `agent` only when its `--version` matches `YYYY.MM.DD-<hex>` |
-| devin | `swe-1-6-slow` | `devin_model_choices` (the Devin model block above) | Cognition's own model, and the one a Devin Free account can run |
+| devin | `swe-2-flash-medium` | `devin_model_choices` (the Devin model block above) | Cognition's newest model a Devin Free account can run |
 | grok | `grok-4.7` | `grok models` | Grok builds, reviews and analyzes, and is never the tester or documenter. Triforge pins the model with `--model` and passes the roster effort as `--effort` (low, medium, high, xhigh; max runs as xhigh). The readiness check looks only for `XAI_API_KEY` or a cached `grok login` and makes no model call, so a lapsed login shows up on the first dispatch, which fails at once with "Not signed in" |
 
 Fetch a list only when the user wants to see options, for example:

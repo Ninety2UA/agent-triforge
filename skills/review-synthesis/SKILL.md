@@ -4,7 +4,7 @@ description: "Use when two or more review outputs exist for one change: merge, d
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # Review Synthesis
@@ -13,10 +13,10 @@ When processing findings from multiple reviewers (Antigravity, Codex, Claude sub
 
 ## Step 1: Collect all findings
 
-Read all review outputs:
-- `ops/REVIEW_ANTIGRAVITY.md` (architecture, design, documentation)
-- `ops/REVIEW_CODEX.md` (logic, security, tests)
-- Any specialist persona outputs (security-sentinel, performance-oracle, etc.)
+Read every review output the cycle dispatched, and only those:
+- `ops/REVIEW_ANTIGRAVITY.md` and `ops/REVIEW_CODEX.md`, the core lanes (shipped analyst and reviewer roles)
+- `ops/REVIEW_<CLI>.md` for each enrolled optional lane
+- `ops/REVIEW_<PERSONA>.md` for each specialist persona (security-sentinel, performance-oracle, etc.)
 
 A lane whose report does not end in `Coverage: complete`, as its last non-empty line and outside any code fence, is a gap: name it, and never read it as no findings.
 

@@ -16,14 +16,14 @@ The default sub-agent mode (< 5 tasks per wave) is in the core skill. The two fo
 
 ### Dynamic workflow mode (5+ tasks or cross-dependent)
 
-For 5+-task waves, author the wave as a native Claude Code dynamic workflow (`ultracode:` prefix) instead of hand-dispatching each subagent. The dependency-grouping process above (Steps 1–2) IS the workflow-authoring method — the wave plan translates directly:
+For 5+-task waves, author the wave as a native Claude Code dynamic workflow (`ultracode:` prefix) instead of hand-dispatching each subagent. The core skill's dependency-grouping process (Steps 1–2) IS the workflow-authoring method — the wave plan translates directly:
 
 - **Stages:** each wave becomes a workflow stage — tasks within a wave run as a `parallel` group; waves chain as a `pipeline` in dependency order
-- **Integration verification:** the between-wave verify (Step 3.3) runs as its own stage between parallel groups; external-CLI steps (Antigravity/Codex via `invoke_antigravity`/`invoke_codex`) dispatch as workflow steps like any other
-- **Mid-run requeue:** a failed task re-enters its stage via a workflow loop with the reflection questions (Step 3.5) prepended, instead of aborting the run
+- **Integration verification:** the between-wave verification (the core skill's Step 3) runs as its own stage between parallel groups; external-CLI steps (Antigravity/Codex via `invoke_antigravity`/`invoke_codex`) dispatch as workflow steps like any other
+- **Mid-run requeue:** a failed task re-enters its stage via a workflow loop with the reflection questions (the core skill's Step 3) prepended, instead of aborting the run
 - **Pinned reviewer:** give the continuous reviewer a fixed label so review work routes to the same instance across stages (1:3–4 ratio with builders)
 
-Capability basis: probe CC-04 in the newest `ops/research/*-probe-record.md` (PASS, expressibility) — dynamic workflows can express external-CLI dispatch + requeue + pinned review. The "Builder-pool wave protocol" above is the lease/cross-review contract those stages carry; it is dogfooded end-to-end (two-task wave, cross-review, single-commit merges, AE3 refusal) in the unit that introduced it.
+Capability basis: probe CC-04 in the newest `ops/research/*-probe-record.md` (PASS, expressibility) — dynamic workflows can express external-CLI dispatch + requeue + pinned review. The core skill's "Builder-pool wave protocol" is the lease/cross-review contract those stages carry.
 
 ### Team mode (experimental alternative for cross-dependent builds)
 

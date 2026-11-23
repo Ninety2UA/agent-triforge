@@ -4,7 +4,7 @@ description: "Use when executing a validated plan of two or more tasks: leases, 
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "2 (build)"
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # Wave Orchestration
@@ -75,11 +75,11 @@ On a hard stop, record `Stop: <what> — <why> — <what the user must decide>` 
 
 ## Red Flags
 
-Stop and re-read the protocol when you are about to merge a task you built or one with no pinned reviewer; when output with no `Status:` line is being read as done; before `lease_rebaseline` without having read what the 44 named; when a task merges because it finished rather than because its wave position is next; when "escalate to user" is typed for anything but a hard stop; when a wave dispatches before the previous one was verified; when a retry starts without the reflection answers.
+Stop and re-read the protocol when you are about to merge a task you built or one with no pinned reviewer; when output with no `Status:` line is being read as done; before `lease_rebaseline` without having read what the 44 named; when a task merges because it finished rather than because its wave position is next; when "escalate to user" is typed for anything but a hard stop or an escalated lease; when a wave dispatches before the previous one was verified; when a retry starts without the reflection answers.
 
 ## Wave execution modes
 
-The default is sub-agent mode (< 5 tasks per wave): each task runs as a parallel executor in its own lease, reviewed and merged in wave order in the same session. The Claude Code forms for 5+ tasks or cross-dependent builds (dynamic workflows, team mode) are in [references/claude.md](references/claude.md), under the same lease and cross-review contract.
+The default is sub-agent mode (< 5 tasks per wave): each task runs as a parallel executor in its lease, reviewed and merged in wave order. The Claude Code forms for 5+ tasks or cross-dependent builds (dynamic workflows, team mode) are in [references/claude.md](references/claude.md), under the same lease and cross-review contract.
 
 ## Output
 

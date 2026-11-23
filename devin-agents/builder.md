@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Opt-in builder on Devin CLI (default model swe-1-6-slow). Implements one assigned task inside an isolated lease worktree. Devin builds only after the roster records the opt-in ([members.devin] opt_in = ["builder"]). Injected as a prompt prefix by the lease dispatch; Devin CLI has no headless agent selector.
+description: Opt-in builder on Devin CLI (default model swe-2-flash-medium). Implements one assigned task inside an isolated lease worktree. Devin builds only after the roster records the opt-in ([members.devin] opt_in = ["builder"]). Injected as a prompt prefix by the lease dispatch; Devin CLI has no headless agent selector.
 ---
 
 # Devin Builder — opt-in builder (Agent Triforge)

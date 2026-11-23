@@ -162,7 +162,7 @@ Give the goal in one sentence. Put your own goal in place of this one: a small g
 Before any work starts it prints a completion line. Paste that line back as your next message:
 
 ```prompt
-/goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; ops/.sprint-complete is created last.
+/goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; every code or test change since the converged review's snapshot has a non-author delta review; ops/.sprint-complete is created last.
 ```
 
 #### Codex leads

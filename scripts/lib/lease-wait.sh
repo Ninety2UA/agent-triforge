@@ -670,8 +670,8 @@ _CODEX_ENV_POLICY=(-c 'shell_environment_policy.inherit="all"' -c 'shell_environ
 #                lease_dispatch names one (<out>.last): codex's final answer
 #                alone, the file lease_collect reads the report from, since
 #                <out> also holds the tool output
-#   antigravity  always the model pin (AE2: agy's own default is a Medium
-#                variant), --add-dir the worktree, --print-timeout, the JSON
+#   antigravity  always the model pin (AE2: agy's own default changes with
+#                the plan and the release), --add-dir the worktree, --print-timeout, the JSON
 #                envelope (KTD2, D-032), -p
 #   opencode     run --format json -m <model>, and --variant <effort> when an
 #                effort is set (OC-05, best effort). No --auto (OC-06: the
@@ -736,6 +736,9 @@ _lease_lane_argv() {
       if [ -n "$LANE_ARG" ]; then _LEASE_LANE_ARGV+=(-o "$LANE_ARG"); fi
       ;;
     antigravity)
+      # lease_dispatch already resolved the model (D-085); this guards a direct
+      # caller, and a listed model passes through
+      DMODEL=$(_agy_model_for_account "$DMODEL")
       _LEASE_LANE_ARGV=(agy --model "$DMODEL" --add-dir "$WT" --print-timeout "${TIMEOUT}s" --output-format json -p)
       ;;
     opencode)

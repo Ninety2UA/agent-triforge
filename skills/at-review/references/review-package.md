@@ -12,7 +12,7 @@ The core lanes, the optional lanes and the specialist sub-agents all review the 
 The package holds three things:
 
 1. Each `[R]` task of the lead's `ops/TASKS.md`, with the indented fields under it (`Accept:`, `Fails when:` and the rest). A blank line inside a task does not end it: a task ends at the next non-blank line indented no deeper than its marked line. The header names `ops/TASKS.md`, which holds every task in full, and `ops/CONTRACTS.md`, both by absolute path.
-2. A complete inventory of changed files: every tracked change from the base to the working tree with its `git diff --name-status` letter, then every untracked file (`git ls-files --others --exclude-standard`) marked `?`. Untracked files are listed by name only. They are not in the diff, and the prompt says so.
+2. A complete inventory of changed files: every tracked change from the base to the working tree with its `git diff --name-status` letter, then every untracked file (`git ls-files --others --exclude-standard`) marked `?`. An untracked regular file of at most 262,144 bytes outside `ops/` and outside any dot directory or dot file is also added to the diff as a new file, so a lane that reviews from a copy of HEAD still reads a test written since the last commit. The lead's own `ops/` records, the per-CLI files the bootstrap writes (all under dot directories such as `.agents/` and `.codex/`), file names that mark a secret (in any letter case: a data file such as `.json`, `.yaml` or `.txt` with `credential`, `secret` or `service account` in its name, `credentials` and `secrets` with no extension, `token.json` and other `*-token.json` or `*-key.json` files, SSH key names, `kubeconfig`, and `.pem`, `.key`, `.p8`, `.p12`, `.pfx`, `.jks`, `.keystore`, `.tfvars`, `.tfstate`, `.env`, `.netrc`, `.htpasswd`, `.secret`), files that hold a private key block or a key shape the lanes' `_scrub` redacts, names git quotes, larger or unreadable files and symlinks are listed by name only, and the prompt says so.
 3. The diff from the base to the working tree, so the branch's commits and the uncommitted edits both show. The inline diff is cut so the whole package stays within 116,000 bytes. A lane's prompt then stays under 120,000 bytes, and under Linux's 131,072-byte limit on one argument even with a role brief added. When the diff is cut, the prompt says so and names `full.diff`, which holds every file.
 
 The base is `REVIEW_BASE` when the lead sets it. It must name a commit, or the review stops and names it. Without it, the base is where HEAD left the default branch, else HEAD. With no explicit base and nothing differing from it, the package falls back to the last commit. A git call that fails stops the review. It never turns into an empty diff or another scope. After `at-build` has promoted, only that fallback is left, so a review of the build sets `REVIEW_BASE` to the commit on the `Build base:` line at the top of `ops/TASKS.md`.
@@ -90,6 +90,25 @@ if [ "$RGIT" -eq 1 ]; then
   if [ "$RGRC" -eq 0 ]; then
     _lgr -c core.quotePath=false ls-files --others --exclude-standard > "$REVIEW_PKG/untracked.txt" 2> "$RERR" || RGRC=$?
   fi
+  # Each untracked regular file outside ops/ and dot directories, up to 262144
+  # bytes, joins the diff as a new file (git diff --no-index exits 1 when it
+  # prints one). The per-CLI files the bootstrap writes all sit in dot
+  # directories, so they stay out of the diff, and so do names that suggest a
+  # secret: the package goes to outside providers.
+  if [ "$RGRC" -eq 0 ]; then
+    while IFS= read -r RUF; do
+      case "$RUF" in ops/*|.*|*/.*|\"*) continue ;; esac
+      case "$(printf '%s' "${RUF##*/}" | tr '[:upper:]' '[:lower:]')" in
+        *.pem|*.key|*.p8|*.p12|*.pfx|*.jks|*.keystore|*.tfvars|*.tfstate|*.tfstate.*|*.env|*.netrc|*.htpasswd|*kubeconfig*|id_rsa*|id_dsa*|id_ecdsa*|id_ed25519*|credentials|secrets|*.secret|*.secrets) continue ;;
+        *credential*.json|*credential*.yaml|*credential*.yml|*credential*.txt|*credential*.ini|*credential*.env|*secret*.json|*secret*.yaml|*secret*.yml|*secret*.txt|*secret*.ini|*service*account*.json|token.json|*tokens.json|*[-_]token.json|*[-_]key.json) continue ;;
+      esac
+      if [ -L "$RUF" ] || [ ! -f "$RUF" ] || [ ! -r "$RUF" ] || [ "$(wc -c < "$RUF" | tr -d ' ')" -gt 262144 ]; then continue; fi
+      # A file that holds a key shape _scrub knows, or a private key block, too.
+      if LC_ALL=C grep -q -e 'PRIVATE KEY-----' -- "$RUF" < /dev/null 2>/dev/null || ! LC_ALL=C _scrub < "$RUF" | cmp -s - "$RUF"; then continue; fi
+      RNI=0; _lgr diff --no-index --no-ext-diff --no-textconv --no-color -- /dev/null "$RUF" >> "$REVIEW_PKG/full.diff" 2> "$RERR" || RNI=$?
+      if [ "$RNI" -gt 1 ]; then RGRC=$RNI; break; fi
+    done < "$REVIEW_PKG/untracked.txt"
+  fi
   if [ "$RGRC" -ne 0 ]; then
     echo "review: STOPPED — collecting the diff from ${RRANGE} failed (git rc ${RGRC}): $(tail -3 "$RERR" | tr '\n' ' ' | cut -c1-300)" >&2; exit 1
   fi
@@ -139,7 +158,7 @@ if os.path.isfile(contracts):
     head += E("The contracts these tasks rely on: %s\n\n" % contracts)
 else:
     head += E("No ops/CONTRACTS.md in the lead checkout (%s).\n\n" % contracts)
-head += E("## Changed files (%d, %d untracked; git diff --name-status from %s, then untracked files marked ?). Untracked files are listed by name only and are not in the diff: read them at their paths.\n" % (len(inv), nu, rng))
+head += E("## Changed files (%d, %d untracked; git diff --name-status from %s, then untracked files marked ?). Each untracked file of at most 262144 bytes outside ops/ and dot directories is in the diff as a new file; the rest (ops/ records, dot files, secret file names or contents, names git quotes, larger or unreadable files, symlinks) are listed by name only: read them at their paths.\n" % (len(inv), nu, rng))
 shown = fit(inv, 40000)
 head += (b"\n".join(shown) if shown else b"(none)") + b"\n"
 if len(shown) < len(inv):

@@ -5,12 +5,12 @@ argument-hint: "[--team] [--wave N]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # Build (Phase 2)
 
-**Goal:** every task in `ops/TASKS.md` built by a roster-assigned builder under its own lease in an isolated worktree, cross-reviewed by a pinned non-author reviewer, merged as one squash commit per task on the sprint integration branch, verified at wave end and promoted to the main branch through the `[promotion]` gate. The builder pool replaces the single-writer rule: safety is leases + worktree isolation + cross-review, not write-restriction.
+**Goal:** every task in `ops/TASKS.md` built by a roster-assigned builder under its own lease in an isolated worktree, cross-reviewed by a pinned non-author reviewer, merged as one squash commit per task on the sprint integration branch, verified at wave end and promoted to the main branch through the `[promotion]` gate. Safety is leases + worktree isolation + cross-review, not write-restriction.
 
 **Done when** all waves are merged, the full test suite and a build from a clean state pass, `integration-verifier` has passed against the integration branch, the promotion gate is satisfied, and `ops/TASKS.md`, `ops/CHANGELOG.md` (one `lease_attribution` line per merged task) and `ops/CONTRACTS.md` reflect the result.
 

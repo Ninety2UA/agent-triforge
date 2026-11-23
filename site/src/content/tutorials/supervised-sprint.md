@@ -32,7 +32,7 @@ git names the branch you are on and lists any changes that are not committed yet
 
 ### Why it matters
 
-Each task's worker starts from the commit its lease is cut from, so it sees only committed work. The review reads the diff up to your working tree, uncommitted edits included, and lists untracked files by name. The test step stops when the files it tests have uncommitted changes. Unfinished changes of your own would be reviewed as part of the sprint.
+Each task's worker starts from the commit its lease is cut from, so it sees only committed work. The review reads the diff up to your working tree, uncommitted edits included, and adds new untracked files outside `ops/` and dot directories to it; other untracked files are listed by name. The test step stops when the files it tests have uncommitted changes. Unfinished changes of your own would be reviewed as part of the sprint.
 
 ### Checkpoint
 

@@ -32,11 +32,14 @@ fi
 #   raw       — neither found; warn with the available agents and run the
 #               bare prompt (no system prompt applied).
 #
-# Every constructed agy command pins the model: agy's own default is a
-# (Medium) variant, so --model "${AGY_MODEL:-Gemini 3.8 Flash (High)}" is
-# mandatory on every path — the newest Gemini at its highest thinking level
-# that every tier can run (D-022, D-060; "Gemini 4 Argon (High)" is the roster
-# opt-in). The "(Low)/(Medium)/(High)" suffix is how agy encodes thinking
+# Every constructed agy command pins the model: agy's own default changes with
+# the plan and the release (Gemini 4 Neon on paid plans since 2026-11-18, a
+# (Medium) variant before), so --model "${AGY_MODEL:-Gemini 4 Neon (High)}" is
+# mandatory on every path — the newest Gemini (D-085). Neon needs a paid
+# Google AI plan; on an account whose `agy models` lacks it, the call runs
+# the next Gemini 4 model it lists, else Gemini 3.8 Flash, at the same level
+# instead (_agy_model_for_account,
+# scripts/lib/common.sh). The "(Low)/(Medium)/(High)/(XHigh)" suffix is how agy encodes thinking
 # effort (a dedicated --effort flag exists but is rejected for display names —
 # AGY-11, KTD1), and AGY_MODEL is the override hook for the roster layer.
 # Every command also passes --add-dir "$PWD": agy has no --cwd and otherwise
@@ -85,7 +88,7 @@ invoke_antigravity() {
   local PROMPT=$2
   local OUTPUT_FILE=${3:-"${TMPDIR:-/tmp}/antigravity_output_$$_$(date +%s).txt"}
   local TIMEOUT=${4:-600}
-  local MODEL="${AGY_MODEL:-Gemini 3.8 Flash (High)}"
+  local MODEL="${AGY_MODEL:-Gemini 4 Neon (High)}"
   local FULL_PROMPT=""
   local MODE=""
   local EXIT_CODE=0
@@ -100,6 +103,7 @@ invoke_antigravity() {
     INVOKE_FAILURE_CLASS="deterministic"
     return 127
   fi
+  MODEL=$(_agy_model_for_account "$MODEL")
 
   # Mode switch (KTD10): TRIFORGE_AGY_MODE=injection|native|auto, default
   # auto since 4.0 (D-042: AGY-12, the native round-trip, and AGY-16, the

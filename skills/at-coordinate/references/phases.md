@@ -47,7 +47,7 @@ Follow the `writing-plans` and `shadow-path-tracing` skills. Embed `ops/CONTRACT
 
 ## Phase 1.1: ambiguity resolution
 
-Before proceeding to build, list every critical assumption in your plan. If any assumption could change the architecture or approach, pause and ask the user to confirm. Do not build on unvalidated assumptions.
+Before proceeding to build, list every critical assumption in your plan. If any assumption could change the architecture or approach, pause and ask the user to confirm. Do not build on unvalidated assumptions. When no user is answering (a `coordinate.sh` iteration, a headless run), do not stall: take the reading that keeps the most options open, record `Ruling: assumed <reading> — <reason>` in `ops/CHANGELOG.md`, and go on; stop only where the assumption meets one of the `wave-orchestration` skill's four hard stops.
 
 ## Phase 1.5: plan validation
 
@@ -59,7 +59,7 @@ Use wave orchestration (the `wave-orchestration` skill: every task leased from `
 
 ## Phase 3: parallel review
 
-Launch Antigravity + Codex (in the background) + the review personas simultaneously, the way the `at-review` skill's dispatch and wait blocks run them: each persona starts detached (`persona_spawn "$RUN" <LANE> <persona> <review package file> <out> --brief "<the review task>"`) and a wait block, rerun while it returns 75, collects them:
+Launch the analyst and reviewer roles (`dispatch_role analyst` and `dispatch_role reviewer`, shipped as Antigravity and Codex, in the background) + the review personas simultaneously, the way the `at-review` skill's dispatch and wait blocks run them: each persona starts detached (`persona_spawn "$RUN" <LANE> <persona> <review package file> <out> --brief "<the review task>"`) and a wait block, rerun while it returns 75, collects them:
 
 - `security-sentinel`
 - `performance-oracle`
@@ -75,11 +75,15 @@ Run `findings-synthesizer` the way the `at-review` skill's synthesis does: start
 
 ## Phase 5: test
 
-Write the scope (the changed paths) to a file, start `persona_spawn "$RUN" test-gap-analyzer test-gap-analyzer <scope file> "$RUN/gaps.md" --brief "Find the untested paths in the scope the input names."` and rerun `persona_wait "$RUN"` in a separate block while it returns 75. It runs at the default `--at ref:HEAD`, which sees committed work only: when the scope has uncommitted changes, stop and ask the user to commit them or name a branch or a full commit id, and never commit for them. Dispatch Codex to write tests, failing test first. Fix failures until green (max 3 cycles).
+Before anything else in Phase 5, save the untracked files' digests for the delta review below: `delta_untracked_save ops/archive/phase5-untracked-<snapshot>.txt`, where `<snapshot>` is the commit in the converged cycle's `## Review dispositions` header.
+
+Write the scope (the changed paths) to a file, start `persona_spawn "$RUN" test-gap-analyzer test-gap-analyzer <scope file> "$RUN/gaps.md" --brief "Find the untested paths in the scope the input names."` and rerun `persona_wait "$RUN"` in a separate block while it returns 75. It runs at the default `--at ref:HEAD`, which sees committed work only: when the scope has uncommitted changes, stop and ask the user to commit them or name a branch or a full commit id, and never commit for them. Dispatch the tester role (`dispatch_role tester`, shipped as Codex) to write tests, failing test first, as the `at-test` skill's Step 2 does. Fix failures until green (max 3 cycles) under a lease with a pinned non-author reviewer, as the `at-test` skill's fix cycle (`at-test/references/fix-cycle.md`) does: Phase 2 already promoted, and `lease_merge` refuses the default branch, so a fix lease merges on a new sprint integration branch, promoted again with `lease_promote`.
+
+When code or tests changed after the converged review, a delta review covers those changes before Phase 6. `<snapshot>` is the commit in the converged cycle's `## Review dispositions` header. Phase 5's first step saved the untracked files' digests (`delta_untracked_save`, `scripts/lib/gates.sh`; a resumed session keeps the list its first session saved). Before Phase 6, `delta_review_paths <snapshot> ops/archive/phase5-untracked-<snapshot>.txt` prints every changed path: the tracked diff with renames off, so a file moved into an exempt path shows under its old name, and each untracked file that is new, changed or gone since the saved list, leaving out the sprint's own bookkeeping (`ops/STATE.md`, `ops/TASKS.md`, `ops/CHANGELOG.md`, `ops/MEMORY.md`, `ops/REVIEW_*.md`, `ops/TEST_RESULTS.md` and `ops/archive/`). Test files count, new ones included, and so does any other `ops/` change such as `ops/roster.toml`. Any printed path means a delta review is due. Its rc 1 (a git call failed) stops the sprint with its error, never read as no change. Its rc 3 means `<snapshot>` names no commit: the delta review then covers the whole sprint from the `Build base:` commit at the top of `ops/TASKS.md`, and when that names none either, stop and record the missing base as the blocker. The delta review is the `at-review` dispatch with `REVIEW_BASE=<snapshot>` (the package's diff carries new untracked files outside `ops/` and dot directories, so every lane reads them), judged by a roster member that wrote none of them (when the tester and the reviewer role run on the same CLI, another roster member judges the tests). It counts against the three-cycle cap; with the cap spent, escalate to the user.
 
 ## Phase 6: wrap up
 
-- Apply `knowledge-compounding` (document to `ops/solutions/` if non-trivial).
+- Apply `knowledge-compounding` when the work corrected a wrong belief (a failed first approach or hypothesis, a P1 or P2 finding a reviewer caught, a wrong assumption or doc); the skill alone decides whether anything is written, and a naming, style or preference fix does not count.
 - Update `ops/CHANGELOG.md`, `ops/MEMORY.md`, `ops/TASKS.md`.
 - Archive review files to `ops/archive/<today's date>/`.
 - Apply the `verification-before-completion` skill.

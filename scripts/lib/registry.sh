@@ -198,12 +198,16 @@ def ladder_parse(text):
 # ignore only excludedCommands, and older builds none, so a repository could
 # take a command out of the sandbox. Later builds close more of it: 2.1.295 and
 # 2.1.299 carry isolation fixes, 2.1.309 stops running the shell's startup files
-# outside the sandbox before each command, and 2.1.314 applies the sandbox to a
-# worktree entered by --resume, so the floor is 2.1.314 (D-059).
+# outside the sandbox before each command, 2.1.314 applies the sandbox to a
+# worktree entered by --resume (D-059), and 2.1.319 to 2.1.325 close the rest
+# the lane leans on: 2.1.323 stops Write and Edit writing into a Read-deny path
+# (the lane denies credential paths with Read rules) and stops -p running Bash
+# unsandboxed on an invalid --settings file, and 2.1.325 adds worktree sandbox
+# fixes, so the floor is 2.1.325 (D-075).
 # _claude_sandbox_floor_ok (lease-wait.sh) reads it for the lease builder and
 # dispatch_role's claude arm, and session start's worker-floor notice reads this
 # line; the one copy.
-TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.314"
+TRIFORGE_CLAUDE_SANDBOX_FLOOR="2.1.325"
 
 # ---------------------------------------------------------------------------
 # CLI registry (KTD7, R25, R41)
@@ -341,7 +345,7 @@ CLIS = {
         "binary_env": "",
         "resolver": "",
         "version_re": "",
-        "model": "Gemini 3.8 Flash (High)",
+        "model": "Gemini 4 Neon (High)",
         "model_env": "AGY_MODEL",
         "install": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         "login": "run `agy` interactively once to complete login",
@@ -361,7 +365,7 @@ CLIS = {
         "binary_env": "",
         "resolver": "",
         "version_re": "",
-        "model": "gpt-6-astra",
+        "model": "gpt-6.2-astra",
         "model_env": "CODEX_MODEL",
         "install": "npm install -g @openai/codex (or brew install codex)",
         "login": "run `codex login`",
@@ -454,7 +458,7 @@ CLIS = {
         "binary_env": "",
         "resolver": "",
         "version_re": "",
-        "model": "swe-1-6-slow",   # what a Devin Free account resolves; DVN-03
+        "model": "swe-2-flash-medium",   # the newest model a Devin Free account runs; DVN-03
         "model_env": "DEVIN_MODEL",
         "install": "brew install --cask devin-cli (or curl -fsSL https://cli.devin.ai/install.sh | bash)",
         "login": "run `devin auth login`",

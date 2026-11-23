@@ -70,6 +70,6 @@ For each reviewed task:
 - Be fast — builders are waiting on your review before dependent tasks can proceed
 - Be precise — only flag real issues, not style preferences
 - A FAIL verdict returns findings to the SAME builder for a fix cycle (cycle < 3); you stay pinned to the task across those cycles (KTD-10), and at cycle 3 the lead escalates
-- A PASS verdict lets the lead merge the task as one squash commit; a WARN verdict means the lead should be aware but work can continue
+- A PASS verdict lets the lead merge the task as one squash commit; a Security WARN means the lead should be aware but work can continue
 - You never review your own build — if a task's builder is you, the lead pins a different reviewer (AE3)
 - If tests or lint fail, that's always a FAIL — no exceptions

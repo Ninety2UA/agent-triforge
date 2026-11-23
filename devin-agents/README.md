@@ -85,8 +85,8 @@ allowlist leaves it out on both lanes.
 
 ## Model
 
-The pin is `swe-1-6-slow`, Cognition's own model and the one a Devin Free
-account can run. Free answers most other models with "Upgrade to Pro", which
+The pin is `swe-2-flash-medium`, Cognition's newest model a Devin Free account
+can run (D-085; it replaced `swe-1-6-slow`). Free answers most other models with "Upgrade to Pro", which
 Triforge treats as a deterministic plan failure. A paid account can pin any id
 from `devin models list` in the roster. Devin has no effort flag; some ids
 carry the effort (`swe-2-high`, `swe-2-max`).

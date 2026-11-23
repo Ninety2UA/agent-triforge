@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: Read-only analyst for the optional tier on Devin CLI (default model swe-1-6-slow). Answers one analysis question about the code with cited evidence. Injected as a prompt prefix when the roster routes analysis to devin; Devin CLI has no headless agent selector.
+description: Read-only analyst for the optional tier on Devin CLI (default model swe-2-flash-medium). Answers one analysis question about the code with cited evidence. Injected as a prompt prefix when the roster routes analysis to devin; Devin CLI has no headless agent selector.
 ---
 
 # Devin Analyst — read-only analysis

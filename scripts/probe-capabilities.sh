@@ -725,7 +725,8 @@ _probe_provision() {
 # model: _u12_argv <worktree> [<resume-id>] sets U12_ARGV from the composer the
 # lease lane runs (_lease_lane_argv claude, read through the loader), with the
 # fixture's .git as the lead's git common dir; empty when it can't be read.
-U12_MODEL="claude-haiku-4-5-20251001"
+# The alias, never a dated id, so these rows follow the latest Haiku.
+U12_MODEL="haiku"
 U12_ARGV=()
 _u12_argv() {
   local K T W
@@ -1168,7 +1169,7 @@ _skip_reason() { [ "$SKIP_LIVE" = "1" ] && echo "SKIPPED" || echo "SKIPPED-GATED
 # Cross-section state, initialised so a missing CLI never leaves a later row
 # reading an unset variable (set -u).
 AGY_PIN=""; AGY_PRO=""; AGY_NEWEST=""; OC_REFUSED=""; AGY_FAMILY=""; AGY_SLUG=""; AGY_PIN_USED=""; AGY_MODEL_ARG=""; TRIFORGE_MISSING=""
-CDX_MODEL="gpt-6-astra"   # D-021 / KD2: every Codex row runs on the flagship pin
+CDX_MODEL="gpt-6.2-astra"   # D-085 (was D-021 / KD2): every Codex row runs on the shipped pin
 OC_GLM=""
 KIMI_AUTH=0               # 1 when KIMI-05 is AUTH-FAIL -> live kimi rows record PENDING-AUTH (R18)
 KIMI_QUOTA=0              # 1 when KIMI-05 is QUOTA-FAIL -> live kimi rows gate on the quota, not a login
@@ -1194,21 +1195,26 @@ if command -v agy >/dev/null 2>&1; then
   row "AGY-01" "agy" "Version capture" "PASS" "${AGY_VERSION:-<no output>}" "direct"
 
   O="$WORK/agy-models.txt"
-  AGY_CAP02="Model list (every Gemini family: the D-022 pin, the newest Pro alongside, a newer family it did not pin — D-060)"
+  AGY_CAP02="Model list (the shipped pin Gemini 4 Neon (High) on this account, the every-plan Gemini it falls back to, the newest family listed — D-085)"
+  AGY_SHIPPED="Gemini 4 Neon (High)"   # registry.sh antigravity model (D-085)
+  AGY_FALLBACK=""
   if _rwt 30 agy models > "$O" 2>&1; then
     cp "$O" "$APPX/agy-models.txt"
     # agy lists "<slug>\t<Display Name>" rows whose display name carries the
-    # thinking-level suffix, e.g. "Gemini 3.8 Flash (High)". Policy (D-022 as
-    # amended by D-060): pin the newest Gemini at its highest thinking level that
-    # every tier of a core-lane user can run. _agy_pick keeps that pin apart from
-    # the newest family listed: a newer family it did not pin (Gemini 4 Argon, not
-    # on Free or Google AI Plus) is named and live-tested here, and stays a roster
-    # opt-in. The newest Pro line is reported alongside. The D-022 watch: a family
-    # newer than the pin appears, or the pinned one stops being open to every tier.
+    # thinking-level suffix, e.g. "Gemini 4 Neon (High)". Policy (D-085): ship
+    # the newest Gemini, and run the newest Gemini every plan can use when the
+    # account's list lacks it (_agy_model_for_account). _agy_pick finds that
+    # every-plan Gemini (the D-022/D-060 rule, now the fallback) and the newest
+    # family listed; the pin rows below run the shipped pin when this account
+    # lists it, else the fallback, as a lane would.
     _agy_pick "$O"
+    AGY_FALLBACK="$AGY_PIN"
     AGY_NEWER_NOTE=""
-    if [ -n "$AGY_NEWEST" ] && [ "$AGY_NEWEST" != "$AGY_PIN" ]; then
-      AGY_NEWER_NOTE="; newest family listed=${AGY_NEWEST}, not pinned (a roster opt-in; the pin stays open to every tier, D-060)"
+    # The D-085 watch: a Gemini with a version above 4 (the Gemini 4 families
+    # are named, not numbered, so none of them is newer than Neon here)
+    AGY_NEWER_VER=$(printf '%s\n' "$AGY_NEWEST" | sed -nE 's/^Gemini ([0-9][0-9.]*) .*/\1/p')
+    if [ -n "$AGY_NEWER_VER" ] && [ "$(printf '%s\n4\n' "$AGY_NEWER_VER" | sort -V | tail -1)" != 4 ]; then
+      AGY_NEWER_NOTE="; newest family listed=${AGY_NEWEST}, not the pin (D-085 watch: a newer Gemini than Neon)"
       if [ "$AGY_LIVE" = 1 ]; then
         if _rwt 120 agy --model "$AGY_NEWEST" -p "Respond with only: READY" < /dev/null > "$O.newest" 2>&1 && grep -q 'READY' "$O.newest"; then
           AGY_NEWER_NOTE="${AGY_NEWER_NOTE}; live-tested: READY on this account"
@@ -1219,16 +1225,27 @@ if command -v agy >/dev/null 2>&1; then
         AGY_NEWER_NOTE="${AGY_NEWER_NOTE}; not live-tested (live probes disabled)"
       fi
     fi
+    # The pin rows run what a lane would (_agy_model_for_account): the pin when
+    # listed, else the next Gemini 4 family listed at (High), else the
+    # every-plan fallback _agy_pick found
+    AGY_SHIPPED_ON="not listed (lanes fall back)"
+    for AGY_C in "$AGY_SHIPPED" "Gemini 4 Hydrogen (High)" "Gemini 4 Argon (High)" "Gemini 4 Carbon (High)"; do
+      if grep -qF "$AGY_C" "$O"; then
+        AGY_PIN="$AGY_C"
+        [ "$AGY_C" = "$AGY_SHIPPED" ] && AGY_SHIPPED_ON="listed"
+        break
+      fi
+    done
     if [ -n "$AGY_PIN" ]; then
-      row "AGY-02" "agy" "$AGY_CAP02" "PASS" "pick=${AGY_PIN}; newest Pro=${AGY_PRO:-none listed}${AGY_NEWER_NOTE}; full list in Appendix B" "direct"
+      row "AGY-02" "agy" "$AGY_CAP02" "PASS" "pin=${AGY_SHIPPED} ${AGY_SHIPPED_ON}; rows run ${AGY_PIN}; every-plan fallback=${AGY_FALLBACK:-none parsed}; newest Pro=${AGY_PRO:-none listed}${AGY_NEWER_NOTE}; full list in Appendix B" "direct"
     else
-      row "AGY-02" "agy" "$AGY_CAP02" "FAIL" "no Gemini Pro/Flash line parsed from agy models${AGY_NEWER_NOTE} — shipped default used for the pin rows; $(_evidence "$O")" "direct"
+      row "AGY-02" "agy" "$AGY_CAP02" "FAIL" "neither the pin nor a Gemini Pro/Flash line parsed from agy models${AGY_NEWER_NOTE} — shipped default used for the pin rows; $(_evidence "$O")" "direct"
     fi
   else
     row "AGY-02" "agy" "$AGY_CAP02" "FAIL" "$(_evidence "$O")" "direct"
   fi
-  [ -z "$AGY_PIN" ] && AGY_PIN="Gemini 3.8 Flash (High)"   # shipped default (D-022 / KD1)
-  AGY_FAMILY=$(printf '%s' "$AGY_PIN" | sed -E 's/ \((Low|Medium|High)\)$//')
+  [ -z "$AGY_PIN" ] && AGY_PIN="$AGY_SHIPPED"   # shipped default (D-085)
+  AGY_FAMILY=$(printf '%s' "$AGY_PIN" | sed -E 's/ \((Low|Medium|High|XHigh)\)$//')
   AGY_SLUG=$(printf '%s' "$AGY_FAMILY" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9.]+/-/g; s/-+$//')
   AGY_MODEL_ARG="$AGY_PIN"
 
@@ -1628,7 +1645,8 @@ if command -v codex >/dev/null 2>&1; then
 }
 EOF
     O="$WORK/cdx-hooks.txt"
-    (cd "$FIX" && _probe_run 240 codex exec -C "$FIX" -s workspace-write -c 'approval_policy="never"' -m "$CDX_MODEL" --dangerously-bypass-hook-trust "Run this shell command: echo hooktest" < /dev/null > "$O" 2>&1) || true
+    CDX04_RC=0
+    (cd "$FIX" && _probe_run 240 codex exec -C "$FIX" -s workspace-write -c 'approval_policy="never"' -m "$CDX_MODEL" --dangerously-bypass-hook-trust "Run this shell command: echo hooktest" < /dev/null > "$O" 2>&1) || CDX04_RC=$?
     FIRED=""
     for evt in SessionStart UserPromptSubmit PreToolUse Stop; do
       [ -f "$MARK/cdx-$evt" ] && FIRED="$FIRED $evt"
@@ -1636,8 +1654,15 @@ EOF
     WARN=$(grep -iE 'hook' "$O" | head -3 | tr '\n' '; ')
     if [ -n "$FIRED" ]; then
       row "CDX-04" "codex" "Hooks fire under codex exec (D-004 re-probe)" "PASS" "fired:${FIRED}; hook-lines: ${WARN:-none}" "marker-file"
+    elif [ "$CDX04_RC" = 0 ] && grep -qi 'Untrusted project-local configuration is disabled' "$O"; then
+      # Codex 0.169.0 and later keep project config, hooks included, off in an
+      # untrusted folder even with the bypass flag, and ignore a runtime -c
+      # trust override; only user-tier trust (or --trust, which writes it)
+      # turns them on, and the probe writes no user tier (R18). Triforge
+      # ships no project hooks, so this records the behavior (D-076).
+      row "CDX-04" "codex" "Hooks fire under codex exec (D-004 re-probe)" "INFO" "untrusted fixture: project hooks off even with --dangerously-bypass-hook-trust (Codex 0.169+ needs user-tier trust; R18); hook-lines: ${WARN:-none}" "marker-file"
     else
-      row "CDX-04" "codex" "Hooks fire under codex exec (D-004 re-probe)" "FAIL" "no markers (SessionStart/UserPromptSubmit/PreToolUse/Stop) even with --dangerously-bypass-hook-trust; hook-lines: ${WARN:-none}" "marker-file"
+      row "CDX-04" "codex" "Hooks fire under codex exec (D-004 re-probe)" "FAIL" "no markers (SessionStart/UserPromptSubmit/PreToolUse/Stop) even with --dangerously-bypass-hook-trust; codex rc=${CDX04_RC}; hook-lines: ${WARN:-none}" "marker-file"
     fi
     rm -f "$FIX/.codex/hooks.json"   # later codex rows run hook-free (CDX-11 reads stderr for one exact warning)
 
@@ -4196,13 +4221,21 @@ for f in sorted(glob.glob(os.path.join(d, 'PostToolUse-*.json'))):
         r = p.get('tool_response')
         fail = type(r).__name__ + ('; exit code shown' if isinstance(r, str) and re.match(r'\s*Exit code:', r) else '; no exit code') + '; ' + repr(r)[:40]
 markers = ' '.join(sorted(n for n in env if n.startswith('CODEX'))) or 'none'
-print('\t'.join([first, ','.join(sorted(set(shell))) or '-', ','.join(sorted(set(patch))) or '-', fail or '-', ' '.join(keys) or '-', markers]))
+print('\t'.join([first or '-', ','.join(sorted(set(shell))) or '-', ','.join(sorted(set(patch))) or '-', fail or '-', ' '.join(keys) or '-', markers]))
 PYEOF
 )
+      # Every field is printed, '-' when empty: a tab is a whitespace IFS
+      # character, so an empty field would collapse and shift the rest
       IFS="$(printf '\t')" read -r U14_FIRST U14_SHELL U14_PATCH U14_FAIL U14_KEYS U14_MK <<EOF
 $U14_V
 EOF
-      if [ -z "$U14_FIRST" ]; then
+      [ "$U14_FIRST" = - ] && U14_FIRST=""
+      if [ -z "$U14_FIRST" ] && grep -qi 'Untrusted project-local configuration is disabled' "$O"; then
+        # Codex 0.169 and later keep project hooks off in an untrusted folder
+        # even with the bypass flag (D-076); the probe writes no user-tier
+        # trust (R18), so no payload can be captured here
+        row "CDX-21" "codex" "$U14_CDX21" "INFO" "untrusted fixture: project hooks off even with --dangerously-bypass-hook-trust, so no PostToolUse payload (Codex 0.169+ needs user-tier trust; D-076, R18)" "marker-file"
+      elif [ -z "$U14_FIRST" ]; then
         if _auth_shaped "$O"; then U14_OUTC=AUTH-FAIL; else U14_OUTC=FAIL; fi
         row "CDX-21" "codex" "$U14_CDX21" "$U14_OUTC" "no PostToolUse payload for a shell read was captured (patch: ${U14_PATCH:--}): $(_evidence "$O")" "marker-file"
       else
@@ -5954,8 +5987,8 @@ COUNTER_MISMATCH=0
   echo "- **AGY-19** → the analyst lane's answer: at-review's prompt as written, on the shipped agent, returns a review in both routings, and a refused write, command or credential read leaves the turn running. A FAIL means the default review stops at its analyst: read the row's denied actions, then what \`agy --help\` says about \`--settings\` (\`_agy_lane_settings\`)."
   echo "- **AGY-15** → the \`--output-format json\` envelope (status, response, denied_actions) that \`invoke_antigravity\` parses instead of trusting exit 0 (KTD2, D-032)."
   echo "- **CDX-02** → \`codex features list\` replaces version-string detection."
-  echo "- **CDX-03/CDX-05/CDX-06/CDX-07/CDX-08** → the \`gpt-6-astra\` pin (D-021): READY, \`--output-schema\` verdicts, max/ultra acceptance (commented opt-ins only where accepted), and the read-only reviewer sandbox on Astra (the ADR open watch)."
-  echo "- **CDX-04** → hooks under \`codex exec\` with \`--dangerously-bypass-hook-trust\` in an untrusted fixture, the probe's stand-in for a trusted hook (CDX-16 and SELF-15c pass the flag for the same reason). \`invoke_codex\` no longer passes it, and the shipped \`templates/.codex/hooks.json\` holds no hooks, so project hooks go through Codex's own trust under \`exec\`; a worker loads no plugin hook (CDX-24)."
+  echo "- **CDX-03/CDX-05/CDX-06/CDX-07/CDX-08** → the \`gpt-6.2-astra\` pin (D-085): READY, \`--output-schema\` verdicts, max/ultra acceptance (commented opt-ins only where accepted), and the read-only reviewer sandbox on Astra (the ADR open watch)."
+  echo "- **CDX-04** → hooks under \`codex exec\` with \`--dangerously-bypass-hook-trust\` in an untrusted fixture, the probe's stand-in for a trusted hook (CDX-16 and SELF-15c pass the flag for the same reason). From Codex 0.169.0 the flag no longer covers project trust: an untrusted fixture keeps project hooks off and the row is INFO (D-076). \`invoke_codex\` no longer passes it, and the shipped \`templates/.codex/hooks.json\` holds no hooks, so project hooks go through Codex's own trust under \`exec\`; a worker loads no plugin hook (CDX-24)."
   echo "- **CDX-09/CDX-09b** → \`\$<skill>\` expansion under \`exec\` from the fixture and from a linked worktree under TMPDIR — the lease lane's shape (linked worktrees inherit root trust, D-026)."
   echo "- **CDX-10** → the project trust gate: AGENTS.md marker visibility with/without a \`[projects.\"<abs>\"]\` trust entry; INFO when no entry exists (R18: the sprint writes no user-tier setting; at-setup reports trust without writing it)."
   echo "- **CDX-11/CDX-11b** → \`.codex/triforge-agents.toml\` is the deployed name (D-026/KTD5): no \"malformed agent role\" sweep warning; 11b is the control that the old \`.codex/agents/agents.toml\` location still triggers it."
@@ -5967,7 +6000,7 @@ COUNTER_MISMATCH=0
   echo "- **CUR-01/CUR-03/CUR-05/CUR-12** → \`_cursor_bin\` resolution (cursor-agent first, verified \`agent\` fallback — CUR-11 is its fixture), the \`grok-4.7-xhigh\` pin, and the bare-family + effort → suffixed-id mapping (D-025, KTD3); **CUR-10** proves the bracket form is rejected."
   echo "- **CUR-06** → hook events not firing headless ⇒ no afterFileEdit attribution hook ships; lead-side ledger attribution covers it. **CUR-07/CUR-08** → sandbox + plan-mode read-only are the reviewer-role enforcement mechanisms. **CUR-09** → \`/<skill>\` expansion in \`-p\` from \`.cursor/skills/\`."
   echo "- **DVN-01..DVN-07** → the Devin lane (U17, R24): completion is the typed Status line plus the exit code (no envelope); readiness reads \`devin auth status\` text, since it exits 0 logged out (DVN-02); DVN-03 is the live gate; **DVN-04** decides setup's disclosure: \`reimport=no\` while the lease lane's env carries no SHELL, \`reimport=yes\` means Devin re-imports the login shell's exports and sees every exported secret (\`devin_env_reimport\` reads it); DVN-05 keeps the read class read-only; DVN-06 is the reviewer fixture lease; DVN-07 shows the read class starts none of the user's MCP servers and that Devin reads a project's legacy \`.cognition/\` directory, which the project guard refuses. **CC-25** → \`~/.local/share/devin\` (Devin's credentials.toml) is closed to a claude worker."
-  echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.1 → Opus 5.5 → Sonnet 5.5, D-020/D-037; the one definition is TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh)."
+  echo "- **CC-02** → the \`fable\` alias decides the spawn-time override for the lead + never-downgrade agents (ladder Fable 5.2 → Opus 5.5 → Sonnet 5.5, D-020/D-037; the one definition is TRIFORGE_MODEL_LADDER in scripts/lib/registry.sh)."
   echo "- **CC-03** → best-effort (D-030): three runs, majority; \`ops/.sprint-complete\` + \`coordinate.sh\` stay the completion mechanism and \`/goal\` remains an assist composed into the prompt."
   echo "- **CC-04** → wave-orchestration may delegate 5+-task waves to dynamic workflows."
   echo "- **CC-05** → monitors parity not demonstrated ⇒ context-monitor.sh and tool-failure-monitor.sh stay, with this row as the recorded reason."
@@ -5989,7 +6022,7 @@ COUNTER_MISMATCH=0
   echo "- **CDX-22** → U14: hooks_trusted under a Codex lead (KTD1): a plugin hook runs only once its own \`hooks.state.<key>\` holds the approval for the \`currentHash\` hooks/list reports (\`<declaration>/<content>\` from Codex 0.164, persisted as \`trusted_hash\` and \`trusted_content_hash\`), and a project hook needs the \`[projects]\` trust entry too; the monitors stay advisory and setup prints the trust step (R18). Codex exports CLAUDE_PLUGIN_ROOT and PLUGIN_ROOT to plugin hooks."
   echo "- **CDX-23** → U13/U14: \`_lease_lead_proc\` (the parent of the tool call's process-group leader) is the codex process, so lease_wait's lead-exit reconcile keys on the lead; inside a sandboxed codex shell ps is blocked, and the D-047 lead itself runs unsandboxed."
   echo "- **RTN-01** → headless watch delivery mode; runtime preflight absorbs all three outcomes."
-  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition (SELF-02, KTD14: the lead's launch_argv and goal_gate, full access only with --allow-full-access, the integrity check before each session, a deterministic lead failure stopping the loop), adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence; SELF-06f: the claude worker lists the .claude/skills copy the real provisioner wrote, KTD16; SELF-06g: the grok worker lists the .agents/skills copy the real provisioner wrote, with folder trust on). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-13** → the \`[lead]\` table (load validation, absent = claude), the lead host check every lead-owned helper runs (the other lead's CLI refused naming at-setup lead, a terminal runs as the user, both leads' markers refused as ambiguous, no TTY and no markers refused outside the SELF seam), \`roster_write_lead\` (from a stated origin only) and its forced handover, reclaim under the other lead, and the lead's capabilities with an absent one reported once (KTD1, R1/R38/R40/R44). **SELF-14** → the ledger's lead CLI and reviewer class, the merge approval a protected snapshot needs (the lead's CLI when it did not build the task, else the user; voided by the next fix cycle), the user's promotion approval bound to the integration tree (voided by a later merge or a default-branch move), the forced-handover rule for a lead-class pin (a pre-4.0 pin classed by its own row's lead), and each approval's recorded origin (KTD2-KTD4, R5/R6/R32/R33). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile, the kill case under a claude and a codex lead (KTD10, R36/R38). **SELF-20** → the \`claude -p\` lane (KTD16, R2/R3): its argv and env, the JSON envelope, session resume, max-turns routed as report missing, names-only .claude/skills provisioning, \`dispatch_role\` running \`claude -p\` under a codex lead, and the Claude Code 2.1.314 floor its sandbox needs. **SELF-22** → a Codex lead in fixtures (U14): the monitors read the lead's tool vocabulary and keep their state outside the project, an unmapped lead leaves them inert with one note, and a Codex-led wave reaches merged (KTD1, KTD14, R21, R44). **SELF-23** → the skill blocks that run personas (at-review's dispatch, wait and synthesis blocks, at-deep-research's swarm, wait and synthesis blocks) as written, under /bin/zsh and /bin/bash with stub lanes: personas started detached and collected by a wait block rerun while it returns 75, a missing lane never converging, the learnings and analyst failure paths, and no zsh glob or word-split failure (U8, KTD5). **SELF-06h** → the Devin worker lists the .agents/skills copy the real provisioner wrote, on the lane's read-class argv (R24). **SELF-24** → Devin as an optional member without a live CLI: readiness read from \`devin auth status\` text, a read config that allows no command, the recorded consent and the builder opt-in at load, in the writers and at dispatch (\`invoke_devin\` and \`lease_dispatch\`), no headless enrollment, the re-import flag setup reads, the lease allowlist as the whole environment on both lanes, the lane argv per class, \`invoke_devin\` on a config copy with the Status line as completion, the lease builder's class, copy removal and compose failure, a reviewer lease to review, and \`~/.local/share/devin\` closed to a claude worker (R24, R25). **SELF-25** → Grok Build's lease lane without a live CLI: the permission class by lease role (a reviewer or analyst lease read-only, with the reviewer brief), and the provisioned \`.grok/config.toml\` that disables every plugin and shadows the MCP servers outside grok's own config, recorded as provisioned so the snapshot never carries it, and appended to a project's own file, never clobbering it; a reviewer or analyst lease runs that check again before each dispatch (R23). **SELF-26** → at-review's blocks, extracted from the skill and run against stub CLIs: the lead's integrity check before the skill's first git call, one review package per cycle for every lane (each \`[R]\` task with its fields, changed-file inventory, a capped inline diff and the full diff in a file, an invalid \`REVIEW_BASE\` or a failed git call stopping the review), promotion on the CLI's final answer (Codex's last-message file on every attempt, in the lease lane too), no retry of an interrupted run, and the lanes in parallel (R23, R24, KTD18). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
+  echo "- **SELF-01..SELF-04** → roster chain rejection, coordinate.sh composition (SELF-02, KTD14: the lead's launch_argv and goal_gate, full access only with --allow-full-access, the integrity check before each session, a deterministic lead failure stopping the loop), adapter env allowlist, the R35 boundary. **SELF-05** → the Status-line parser seam (KTD11: DONE / MISSING / BLOCKED). **SELF-06** → lease-lane skill discovery per CLI under the env -i boundary (KTD7/R9; PASS = the probe skill is listed, shipped coverage in the evidence; SELF-06f: the claude worker lists the .claude/skills copy the real provisioner wrote, KTD16; SELF-06g: the grok worker lists the .agents/skills copy the real provisioner wrote, with folder trust on). **SELF-07** → the TRIFORGE_TEST_BUILDER lifecycle: DONE → review, report missing → never review-ready, BLOCKED → escalated (KTD11). **SELF-08** → session-start idempotence (KTD7/KTD8) and the upgrade notices: the 2.1.277 floor, a stale 3.x template copy, a CLAUDE.md above the project (R40). **SELF-08b** → the digest-stamped skills refresh: only Triforge's own unchanged copies are replaced or retired, in session start and lease provisioning alike (KTD12/R31). **SELF-09** → the no-push backstop (CS1). **SELF-10** → the protected-path lists in \`scripts/lib/registry.sh\` and the fail-closed scan in \`lease_promote\` (KTD8/R30). **SELF-13** → the \`[lead]\` table (load validation, absent = claude), the lead host check every lead-owned helper runs (the other lead's CLI refused naming at-setup lead, a terminal runs as the user, both leads' markers refused as ambiguous, no TTY and no markers refused outside the SELF seam), \`roster_write_lead\` (from a stated origin only) and its forced handover, reclaim under the other lead, and the lead's capabilities with an absent one reported once (KTD1, R1/R38/R40/R44). **SELF-14** → the ledger's lead CLI and reviewer class, the merge approval a protected snapshot needs (the lead's CLI when it did not build the task, else the user; voided by the next fix cycle), the user's promotion approval bound to the integration tree (voided by a later merge or a default-branch move), the forced-handover rule for a lead-class pin (a pre-4.0 pin classed by its own row's lead), and each approval's recorded origin (KTD2-KTD4, R5/R6/R32/R33). **SELF-18** → lead-side git hardening (\`_lead_git\`), integrity detection with restore and escalation, and snapshot-only merges (KTD18/KTD19, R46/R47/R49). **SELF-19** → detached builders (pid == pgid, a start-time fingerprint), \`lease_wait\` within the lead's \`wait_budget_s\`, and the lead-exit reconcile, the kill case under a claude and a codex lead (KTD10, R36/R38). **SELF-20** → the \`claude -p\` lane (KTD16, R2/R3): its argv and env, the JSON envelope, session resume, max-turns routed as report missing, names-only .claude/skills provisioning, \`dispatch_role\` running \`claude -p\` under a codex lead, and the Claude Code 2.1.325 floor its sandbox needs. **SELF-22** → a Codex lead in fixtures (U14): the monitors read the lead's tool vocabulary and keep their state outside the project, an unmapped lead leaves them inert with one note, and a Codex-led wave reaches merged (KTD1, KTD14, R21, R44). **SELF-23** → the skill blocks that run personas (at-review's dispatch, wait and synthesis blocks, at-deep-research's swarm, wait and synthesis blocks) as written, under /bin/zsh and /bin/bash with stub lanes: personas started detached and collected by a wait block rerun while it returns 75, a missing lane never converging, the learnings and analyst failure paths, and no zsh glob or word-split failure (U8, KTD5). **SELF-06h** → the Devin worker lists the .agents/skills copy the real provisioner wrote, on the lane's read-class argv (R24). **SELF-24** → Devin as an optional member without a live CLI: readiness read from \`devin auth status\` text, a read config that allows no command, the recorded consent and the builder opt-in at load, in the writers and at dispatch (\`invoke_devin\` and \`lease_dispatch\`), no headless enrollment, the re-import flag setup reads, the lease allowlist as the whole environment on both lanes, the lane argv per class, \`invoke_devin\` on a config copy with the Status line as completion, the lease builder's class, copy removal and compose failure, a reviewer lease to review, and \`~/.local/share/devin\` closed to a claude worker (R24, R25). **SELF-25** → Grok Build's lease lane without a live CLI: the permission class by lease role (a reviewer or analyst lease read-only, with the reviewer brief), and the provisioned \`.grok/config.toml\` that disables every plugin and shadows the MCP servers outside grok's own config, recorded as provisioned so the snapshot never carries it, and appended to a project's own file, never clobbering it; a reviewer or analyst lease runs that check again before each dispatch (R23). **SELF-26** → at-review's blocks, extracted from the skill and run against stub CLIs: the lead's integrity check before the skill's first git call, one review package per cycle for every lane (each \`[R]\` task with its fields, changed-file inventory, a capped inline diff and the full diff in a file, an invalid \`REVIEW_BASE\` or a failed git call stopping the review), promotion on the CLI's final answer (Codex's last-message file on every attempt, in the lease lane too), no retry of an interrupted run, and the lanes in parallel (R23, R24, KTD18). Under \`--self-only\` these rows are the whole run and any SELF FAIL exits 3 (KTD15)."
   echo "- **SELF-21** → the project bootstrap as a helper (KTD11, R37): at-setup's block, read from its SKILL.md, sets up a fresh project with no hook run — \`ops/\`, the skills copy, the per-CLI files and an untracked plugin-root pointer — and at-build's preflight then loads the helpers through that pointer; a second run under bash or zsh changes nothing, session start afterwards prints no one-time notice, and the worker marker or a lease root refuses it (rc 45)."
   echo "- **SELF-16** → at-setup (U15; R7, R8, R9, R24, R39, R40, R43, R50): the lead asked first and written last, one roster at the checkout top, the egress and HOME credential-read disclosure computed from the enabled members, Codex trust and hook trust read and never written, the launch lines, sandbox-aware auth, and instruction files detected in the project and above, with ask-first writers and the AGENTS.md budget."
   echo
@@ -6049,7 +6082,7 @@ if [ "$SELF_ONLY" = "1" ]; then
   SELF_EXPECTED="$SELF_EXPECTED SELF-25"            # Grok Build's lease lane (U16)
   SELF_EXPECTED="$SELF_EXPECTED SELF-26"            # at-review's blocks run verbatim (U16, U17)
   SELF_EXPECTED="$SELF_EXPECTED SELF-16"            # at-setup's primitives and instruction files (U15)
-  SELF_EXPECTED="$SELF_EXPECTED SELF-27 SELF-28 SELF-17"   # Phase 6: S1 python path, U19 watch cycle, U20 two-lead sprint
+  SELF_EXPECTED="$SELF_EXPECTED SELF-27 SELF-17"   # Phase 6: S1 python path, U20 two-lead sprint
   SELF_EXPECTED="$SELF_EXPECTED SELF-29"            # Phase 6 wave 2: agy auto + AGY_ERROR, Cursor probe ids, deleted ledger anchors
   SELF_EXPECTED="$SELF_EXPECTED SELF-30"            # the shell house rules, scanned (review finding #10)
   SELF_EXPECTED="$SELF_EXPECTED SELF-31"            # the install smoke row (F2, D-067)

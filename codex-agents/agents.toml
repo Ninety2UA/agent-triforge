@@ -25,7 +25,7 @@
 # deferred item). logic_reviewer and test_writer spawn sub-agents for 5+ file
 # scopes; max_depth = 2 declares one spawn round with no spawn-of-spawn.
 # NOTE (D-026): `max_depth` is honored only by the V1 multi-agent runtime —
-# gpt-6-astra (and the previous flagship generation) runs multi_agent_v2 by catalog and ignores it;
+# gpt-6.2-astra (like gpt-6-astra and the generation before) runs multi_agent_v2 by catalog and ignores it;
 # `job_max_runtime_seconds` is a no-op on current Codex. The two
 # default_subagent_* keys declare the model/effort every spawned sub-agent
 # should pin (S18: set model and effort on every spawn).
@@ -33,16 +33,16 @@
 max_depth = 2
 max_threads = 4
 job_max_runtime_seconds = 1800
-default_subagent_model = "gpt-6-astra"
+default_subagent_model = "gpt-6.2-astra"
 default_subagent_reasoning_effort = "xhigh"
 
 [agents.logic_reviewer]
 name = "logic_reviewer"
 description = "Logic and security reviewer for Phase 3. Reviews code for correctness, edge cases, type safety, security vulnerabilities, and test coverage gaps."
-model = "gpt-6-astra"
+model = "gpt-6.2-astra"
 model_reasoning_effort = "xhigh"
-# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6-astra each cycle (newest ops/research/*-probe-record.md)
-# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
+# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6.2-astra each cycle (newest ops/research/*-probe-record.md)
+# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6.2-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "read-only"
 approval_policy = "never"
 # Triforge-level key (see header): invoke-external.sh resolves this file name
@@ -147,10 +147,10 @@ agent reported.
 [agents.test_writer]
 name = "test_writer"
 description = "TDD test writing agent for Phase 5. Writes tests using RED-GREEN-REFACTOR methodology, conforming to CONTRACTS.md types."
-model = "gpt-6-astra"
+model = "gpt-6.2-astra"
 model_reasoning_effort = "xhigh"
-# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6-astra each cycle (newest ops/research/*-probe-record.md)
-# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
+# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6.2-astra each cycle (newest ops/research/*-probe-record.md)
+# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6.2-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 tools = ["read", "grep", "glob", "write", "bash"]
@@ -229,10 +229,10 @@ If the test scope covers 5+ files, use spawn_agent to parallelize:
 [agents.debugger]
 name = "debugger"
 description = "Structured debugging agent. Reproduces first, then diagnoses with error taxonomy, assumption tracking, and root cause analysis before any fix."
-model = "gpt-6-astra"
+model = "gpt-6.2-astra"
 model_reasoning_effort = "xhigh"
-# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6-astra each cycle (newest ops/research/*-probe-record.md)
-# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
+# model_reasoning_effort = "max"    # opt-in — CDX-06 re-probes it on gpt-6.2-astra each cycle (newest ops/research/*-probe-record.md)
+# model_reasoning_effort = "ultra"  # opt-in — CDX-07 re-probes it on gpt-6.2-astra; NOTE: ultra fans out to internal subagents (changes execution shape/cost)
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 tools = ["read", "grep", "glob", "write", "bash"]

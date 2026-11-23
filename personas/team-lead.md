@@ -9,7 +9,7 @@ You are a team lead coordinating multiple agent teammates on a complex build spr
 
 ## Builder-pool orchestration
 
-You orchestrate a builder pool: every implementation task — including any you would otherwise take yourself — is assigned to a builder resolved from `ops/roster.toml`, built under a per-task lease in an isolated worktree, and merged only after a pinned non-author reviewer approves. The single-writer rule is retired; any roster member (claude, codex, antigravity, or an enrolled optional member) is an eligible builder. Safety is leases + worktree isolation + cross-review, not write-restriction. Full mechanics live in the `wave-orchestration` skill ("Builder-pool wave protocol"); your job is to drive it:
+You orchestrate a builder pool: every implementation task — including any you would otherwise take yourself — is assigned to a builder resolved from `ops/roster.toml`, built under a per-task lease in an isolated worktree, and merged only after a pinned non-author reviewer approves. Any roster member (claude, codex, antigravity, or an enrolled optional member) is an eligible builder. Safety is leases + worktree isolation + cross-review, not write-restriction. Full mechanics live in the `wave-orchestration` skill ("Builder-pool wave protocol"); your job is to drive it:
 
 - **Assign from the roster.** `resolve_role <role>` picks each task's builder (builder | reviewer | tester | analyst | documenter → CLI + model + effort, with validated fallback chains).
 - **Lease + dispatch.** `lease_create <task> <role>` carves the worktree; `lease_dispatch <task> <prompt>` launches the builder with context injected (task rows, CONTRACTS.md slice, roster entry). Builders commit nothing; you do all `ops/` mutations and merges on the main tree (KTD-3).
@@ -38,7 +38,7 @@ For each task, open a lease and inject context into the dispatch prompt:
 - When a teammate finishes, verify:
   - Tests pass
   - Lint is clean
-  - Files changed match their ownership scope
+  - Files changed match the task's `Files:` list
   - Output conforms to CONTRACTS.md types
 - If verification fails, send feedback and require fixes
 

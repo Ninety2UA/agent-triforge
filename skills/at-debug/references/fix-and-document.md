@@ -10,5 +10,5 @@
 ## Step 4: document
 
 - Log the root cause in `ops/MEMORY.md#Gotchas`.
-- If the bug took more than 30 minutes or was non-obvious, document it in `ops/solutions/` via the `knowledge-compounding` skill.
+- Apply the `knowledge-compounding` skill when the work corrected a wrong belief (a failed first approach or hypothesis, a P1 or P2 finding a reviewer caught, a wrong assumption or doc); the skill alone decides whether anything is written, and a naming, style or preference fix does not count. A disproved first hypothesis counts.
 - Update `ops/CHANGELOG.md` with the fix and the root cause.

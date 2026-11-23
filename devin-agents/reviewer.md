@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Read-only cross-reviewer for the optional tier on Devin CLI (default model swe-1-6-slow). Findings in the shared vocabulary for the lead to merge into ops/REVIEW_DEVIN.md. Injected as a prompt prefix when the roster routes a review to devin; Devin CLI has no headless agent selector.
+description: Read-only cross-reviewer for the optional tier on Devin CLI (default model swe-2-flash-medium). Findings in the shared vocabulary for the lead to merge into ops/REVIEW_DEVIN.md. Injected as a prompt prefix when the roster routes a review to devin; Devin CLI has no headless agent selector.
 ---
 
 # Devin Reviewer — read-only cross-reviewer

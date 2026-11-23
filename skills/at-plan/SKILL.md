@@ -5,7 +5,7 @@ argument-hint: "[goal description]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # Plan
@@ -16,7 +16,7 @@ Invoked with the goal text; when absent, ask the user for the goal and wait. The
 
 **Goal:** an `ops/TASKS.md` a build can run from: a `Ceremony:` line first, atomic tasks (1–2 hours each) with a role, a Context field carrying the `ops/CONTRACTS.md` types they touch, shadow paths and error maps on the non-trivial ones, grouped into waves.
 
-**Done when** the plan-checker verdict, read through `persona_verdict`, is APPROVED (or the plan is trivial and the `Ceremony:` line says so), the user has confirmed or corrected the critical assumptions, and the file is written without disturbing another goal's open rows. Report APPROVED to the user only then.
+**Done when** the plan-checker verdict, read through `persona_verdict`, is APPROVED (or the plan is trivial and the `Ceremony:` line says so), the user has confirmed or corrected the critical assumptions (or, with no user answering, each is ledgered as a `Ruling:`), and the file is written without disturbing another goal's open rows. Report APPROVED to the user only then.
 
 **Safe failure:** when in doubt take the heavier ceremony; open rows that belong to another goal stop the write until the user rules (an unattended run archives them, the recoverable choice); a Phase 0 analysis that fails or returns nothing is reported and skipped, never promoted; after three NEEDS_REVISION rounds, stop and show the user the remaining findings. Approval of an idea is not approval of an unseen plan.
 

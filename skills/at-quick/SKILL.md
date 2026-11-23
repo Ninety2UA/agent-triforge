@@ -5,7 +5,7 @@ argument-hint: "[change description]"
 disable-model-invocation: true
 metadata:
   triforge-consumer: "lead"
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # Quick
@@ -31,4 +31,4 @@ Invoked with the change description; when absent, ask the user what to change an
 - The one-line `Ceremony:` statement.
 - The change and its test; the test and lint results (existing suite green, new test green).
 - The self-review verdict through the four lenses — or the escalation to `at-review --security` / `at-review --perf`, or the hand-off line raising the ceremony.
-- `ops/CHANGELOG.md` updated (1–2 lines); `ops/MEMORY.md` when a gotcha surfaced; `ops/solutions/` via the `knowledge-compounding` skill when the fix was non-trivial.
+- `ops/CHANGELOG.md` updated (1–2 lines); `ops/MEMORY.md` when a gotcha surfaced; the `knowledge-compounding` skill applied when the work corrected a wrong belief (a failed first approach or hypothesis, a P1 or P2 finding a reviewer caught, a wrong assumption or doc); the skill alone decides whether anything is written, and a naming, style or preference fix does not count.

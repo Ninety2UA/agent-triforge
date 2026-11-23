@@ -33,4 +33,4 @@ If any of these raise concerns, tell the user to run `/at-review --security` or 
 
 - Update `ops/CHANGELOG.md` (1–2 lines).
 - Update `ops/MEMORY.md` if you discovered a gotcha.
-- If the fix was non-trivial, document it in `ops/solutions/` via the `knowledge-compounding` skill.
+- Apply the `knowledge-compounding` skill when the work corrected a wrong belief (a failed first approach or hypothesis, a P1 or P2 finding a reviewer caught, a wrong assumption or doc); the skill alone decides whether anything is written, and a naming, style or preference fix does not count.

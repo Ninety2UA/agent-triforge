@@ -13,7 +13,7 @@
 #                     the flags that carry [lead] model and effort ("{}" =
 #                     the value), placed after launch_argv and before the
 #                     prompt; an empty value adds nothing (a Codex lead's
-#                     defaults are gpt-6-astra at xhigh, Claude Code's empty).
+#                     defaults are gpt-6.2-astra at xhigh, Claude Code's empty).
 #   lead.goal_gate    non-empty (Claude Code: /goal): the prompt LEADS with
 #                     "<goal_gate> <completion checklist>" (a slash command
 #                     works only as the first line of a headless prompt).
@@ -282,7 +282,7 @@ if [ -z "$GOAL_GATE" ]; then
   GOAL_QUOTED=$(CA_GOAL="$GOAL" python3 -c "${_PY_PRELUDE}"'import json, os; print(json.dumps(" ".join(os.environ["CA_GOAL"].splitlines()), ensure_ascii=False))')
 fi
 
-CHECKLIST="Sprint complete ONLY when ALL of: (1) every framework phase for the goal is done or explicitly skipped with a stated reason; (2) the verification-before-completion checklist passes with evidence; (3) ops/STATE.md is written for session handoff; (4) temporary review files are archived to ops/archive/; (5) the runtime marker ops/.sprint-complete exists — created LAST, only after conditions 1-4 hold."
+CHECKLIST="Sprint complete ONLY when ALL of: (1) every framework phase for the goal is done or explicitly skipped with a stated reason; (2) the verification-before-completion checklist passes with evidence; (3) ops/STATE.md is written for session handoff; (4) temporary review files are archived to ops/archive/; (5) every code or test change since the converged review's snapshot has a delta review from a roster member that wrote none of it; (6) the runtime marker ops/.sprint-complete exists — created LAST, only after conditions 1-5 hold."
 
 # Compose the per-iteration session prompt. Sets $PROMPT.
 # $1 = iteration number.
@@ -318,14 +318,16 @@ If this is iteration 1 and no STATE.md exists, start from Phase 0.${LEASE_RESUME
 
 $LEASE_RESUME}
 
-Follow the Agent Triforge framework (docs/agent-triforge.md):
-- Phase 0: Codebase analysis (Antigravity) — skip if STATE.md shows Phase 0 complete
+No user is answering this run. Where a phase would ask the user, rule on any reversible question inside the approved goal, record it as a 'Ruling: <decision> — <reason>' line in ops/CHANGELOG.md, and continue. A missing approval, a spent review cycle cap or another hard stop still stops the work that depends on it: record a 'Stop: <what> — <why> — <what the user must decide>' line in the same ledger and in ops/STATE.md, finish the work that does not depend on it, and do not work past it.
+
+Follow the Agent Triforge framework (docs/agent-triforge.md); each phase dispatches the role ops/roster.toml assigns:
+- Phase 0: Codebase analysis (the analyst role) — skip if STATE.md shows Phase 0 complete
 - Phase 1: Planning — skip if TASKS.md already exists for this goal
 - Phase 1.5: Plan validation — run the plan-checker persona
 - Phase 2: Build — use wave orchestration for complex builds
-- Phase 3: Parallel review — Antigravity + Codex + the reviewer personas
+- Phase 3: Parallel review — the analyst and reviewer roles, any enrolled optional lanes, and the reviewer personas
 - Phase 4: Process reviews — run the findings-synthesizer persona
-- Phase 5: Test — Codex writes and runs tests
+- Phase 5: Test — the tester role writes and runs tests; a code or test change after the converged review gets a delta review before completion
 - Phase 6: Wrap up — compound knowledge, update STATE.md
 
 Before exiting, ALWAYS update ops/STATE.md with current progress.

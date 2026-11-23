@@ -12,15 +12,16 @@ Core trio:
 
 ```bash
 # Claude Code ≥ 2.1.277 — the first build that reads a root AGENTS.md (D-037);
-# a claude worker, the shipped builder, needs ≥ 2.1.314 (the sandbox isolation fixes);
+# a claude worker, the shipped builder, needs ≥ 2.1.325 (the sandbox and permission fixes);
 # 2.1.267 first honored `effort:` frontmatter on pinned-default models and the
-# `fable` alias resolves to Fable 5.1 from 2.1.257
+# `fable` alias resolves to Fable 5.2 from 2.1.321
 claude --version
 
 # Antigravity CLI ≥ 1.1.27 — https://antigravity.google/cli (run `agy` once interactively to log in)
-agy --model "Gemini 3.8 Flash (High)" -p "Respond with only: READY"   # pin the model — agy's own default is a (Medium) variant
+agy --model "Gemini 4 Neon (High)" -p "Respond with only: READY"   # pin the model — agy's own default changes with the plan and release
+# On Google's Free or AI Plus plan agy has no Gemini 4 models: test with --model "Gemini 3.8 Flash (High)" (Triforge switches to it on its own)
 
-# Codex CLI ≥ 0.153.0 (gpt-6-astra's minimal client version) — https://github.com/openai/codex
+# Codex CLI ≥ 0.166.0 (gpt-6.2-astra's minimal client version) — https://github.com/openai/codex
 codex exec "Respond with only: READY"
 
 # Python 3 (used by hook handlers for JSON parsing)
@@ -47,7 +48,7 @@ cursor-agent -p --trust --model grok-4.7-xhigh "Respond with only: READY"
 
 # Devin CLI ≥ 3000.10.31 (`devin auth login`) — a reviewer and analyst; at-setup asks for your
 # consent before enrolling it, and it builds only after a separate opt-in
-devin --model swe-1-6-slow --respect-workspace-trust false -p "Respond with only: READY"
+devin --model swe-2-flash-medium --respect-workspace-trust false -p "Respond with only: READY"
 
 # Grok Build ≥ 1.0.34 (builder, reviewer or analyst) — `grok login` (`grok login --device-code` without a browser) or XAI_API_KEY
 grok --model grok-4.7 --output-format json -p "Respond with only: READY"
@@ -88,7 +89,7 @@ grok --model grok-4.7 --output-format json -p "Respond with only: READY"
    trust_level = "trusted"
    ```
 
-   `at-setup` checks for the entry and prints it, with the path filled in, when it is missing. Triforge never writes your user-level config. Codex can: `codex exec -s workspace-write`, which a Codex builder runs, writes this entry for the repo itself, so after the first Codex builder the project reads as trusted and its `.codex/` files apply. Without the entry the root `AGENTS.md` still loads, but Codex skips the project's `.codex/` files; a project you mark `untrusted` loses the root `AGENTS.md` as well. [`templates/.codex/config.toml`](../templates/.codex/config.toml) is the project file that entry unlocks.
+   `at-setup` checks for the entry and prints it, with the path filled in, when it is missing. Triforge never writes your user-level config, and from Codex 0.169.0 a `codex exec -s workspace-write` run no longer writes the entry either (`codex exec --trust` does, if you choose it), so add it yourself for the project's `.codex/` files to apply; a runtime `-c` trust override is ignored. Without the entry the root `AGENTS.md` still loads, but Codex skips the project's `.codex/` files; a project you mark `untrusted` loses the root `AGENTS.md` as well. [`templates/.codex/config.toml`](../templates/.codex/config.toml) is the project file that entry unlocks.
 
 4. Start the lead (`claude` or `codex`) in your project. The first session bootstraps the project's `ops/` directory ([Automatic project bootstrapping](project-layout.md#automatic-project-bootstrapping)).
 

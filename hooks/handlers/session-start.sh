@@ -486,7 +486,7 @@ case "$ENROLLED_COUNT" in ''|*[!0-9]*) ENROLLED_COUNT=0 ;; esac   # a count, not
 # scripts/lib/roster.sh: role -> cli) — handed to python as environment
 # variables and exec'd, so this hook carries no copy (validate-versions.sh
 # check 3 fails one that creeps back). An effort variant of the default is NOT
-# drift: the agy `(Low|Medium|High)` suffix and the Cursor
+# drift: the agy `(Low|Medium|High|XHigh)` suffix and the Cursor
 # `-low|-medium|-high|-xhigh` suffix are effort controls (KTD3, KTD6), so both
 # sides are compared with that suffix stripped. Tolerant: a malformed roster
 # prints nothing (resolve_role raises the loud error later); skipped without
@@ -509,7 +509,7 @@ SHIPPED = {cli: e["model"] for cli, e in ns["CLIS"].items() if e["model"]}
 ROLE_CLI = {role: d["cli"] for role, d in ns["DEFAULTS"].items()}
 def norm(cli, model):
     if cli == "antigravity":
-        return re.sub(r"\s*\((Low|Medium|High)\)\s*$", "", model)
+        return re.sub(r"\s*\((Low|Medium|High|XHigh)\)\s*$", "", model)
     if cli == "cursor":
         return re.sub(r"-(low|medium|high|xhigh)$", "", model)
     return model

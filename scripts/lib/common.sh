@@ -318,6 +318,45 @@ _agy_agents_listing() {
   _run_with_timeout 10 agy agents 2>/dev/null || true
 }
 
+# _agy_model_for_account <model> — print the model an agy call should carry.
+# The Gemini 4 families are paid-plan only (Neon, Argon and Hydrogen on Google
+# AI Pro and above, Carbon on Ultra and Enterprise), and agy refuses a model
+# the account lacks with exit 1 ("is not recognized as a known model"). So
+# for a "Gemini 4 ..." model this reads `agy models` (tab-separated slug and
+# display name, 20 s cap) and, when the listing names other models but not
+# this one, prints the first listed candidate: the same family at (High) when
+# the asked level is missing or absent, then Gemini 4 Neon, Hydrogen, Argon
+# and Carbon, then Gemini 3.8 Flash (the newest Gemini every plan runs), each
+# at the asked level and, for (XHigh), at (High) too, with a NOTE on stderr
+# (D-085). Any other model, a listing that fails or carries no model line, and
+# a listing with no candidate pass the model through unchanged: only a model
+# agy is known to refuse is replaced. Sourced into bash and zsh alike, so no
+# pattern here holds a bare parenthesis (zsh reads one as a glob group).
+_agy_model_for_account() {
+  local M=$1 LIST="" LVL="" FAM="" C="" L="" T=""
+  case "$M" in "Gemini 4 "*) : ;; *) printf '%s\n' "$M"; return 0 ;; esac
+  command -v agy >/dev/null 2>&1 || { printf '%s\n' "$M"; return 0; }
+  LIST=$(_run_with_timeout 20 agy models 2>/dev/null | awk -F'\t' 'NF >= 2 {print $2}') || LIST=""
+  if [ -z "$LIST" ] || printf '%s\n' "$LIST" | grep -qxF -- "$M"; then
+    printf '%s\n' "$M"; return 0
+  fi
+  case "$M" in *"(XHigh)") LVL=XHigh ;; *"(Low)") LVL=Low ;; *"(Medium)") LVL=Medium ;; *) LVL=High ;; esac
+  FAM=$(printf '%s\n' "$M" | sed -E 's/ [(](Low|Medium|High|XHigh)[)]$//')
+  for C in "$FAM" "Gemini 4 Neon" "Gemini 4 Hydrogen" "Gemini 4 Argon" "Gemini 4 Carbon" "Gemini 3.8 Flash"; do
+    for L in "$LVL" High; do
+      if [ "$L" = High ] && [ "$LVL" = Low -o "$LVL" = Medium ]; then continue; fi
+      T="$C ($L)"
+      [ "$T" = "$M" ] && continue
+      if printf '%s\n' "$LIST" | grep -qxF -- "$T"; then
+        echo "agy: NOTE this account's agy does not list '${M}' (Gemini 4 models need a paid Google AI plan); running '${T}' instead" >&2
+        printf '%s\n' "$T"
+        return 0
+      fi
+    done
+  done
+  printf '%s\n' "$M"
+}
+
 # List known Antigravity agent names: plugin injection templates plus whatever
 # `agy agents` reports (first token per name line; the "Available agents:"
 # header is dropped).

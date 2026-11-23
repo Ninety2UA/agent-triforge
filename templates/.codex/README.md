@@ -16,7 +16,10 @@ project: `.codex/hooks.json`, `.codex/config.toml` and `.codex/.rules` are skipp
 trust is unset (unset = untrusted for these files; `exec` never prompts). The project's
 root `AGENTS.md` is different (0.150.0, D-045): it is skipped only when trust is
 explicitly `untrusted`, so an unset project still loads it. Linked worktrees inherit
-the root checkout's trust.
+the root checkout's trust. From Codex 0.169.0 an untrusted project also keeps project
+hooks and project MCP servers off even under `--dangerously-bypass-hook-trust`, a
+runtime `-c` trust override is ignored, and a `codex exec -s workspace-write` run
+writes no trust entry (D-076).
 
 To trust the project, add it to the user-tier `~/.codex/config.toml` yourself
 (Triforge never writes this file):

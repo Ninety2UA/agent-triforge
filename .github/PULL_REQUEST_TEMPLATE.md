@@ -25,6 +25,8 @@ versions produced this change.
 
 ## Verification
 
+Write `not run` beside a check you did not run.
+
 - [ ] `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin validate --strict .claude-plugin/marketplace.json` pass (warnings are errors)
 - [ ] `bash scripts/validate-skills.sh` exits 0 (warnings are errors; `--warn` is the relaxed run), and its `--self-test` reports every fixture OK
 - [ ] `bash scripts/validate-versions.sh` exits 0 — summary line: `<paste it: ladder: one definition (scripts/lib/registry.sh)>` — and its `--self-test` reports every case OK

@@ -4,7 +4,7 @@ description: "Use when processing review findings after a build: triage, fix, di
 metadata:
   triforge-consumer: "the lead"
   triforge-phase: "4 (process reviews)"
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # Iterative Refinement
@@ -25,7 +25,7 @@ Treat a builder's report as unverified claims. A rationale in the report ("this 
 
 ## Step 1: Triage findings
 
-Categorize all findings from all reviewers (REVIEW_ANTIGRAVITY.md, REVIEW_CODEX.md, subagent reviews):
+Categorize all findings from every review lane this cycle dispatched (the core `ops/REVIEW_*.md` lanes, each optional lane, each specialist persona):
 
 | Priority | Definition | Action |
 |---|---|---|
@@ -87,7 +87,7 @@ A dismissed finding counts as resolved for convergence only when its reason is e
 
 ### Cycle limits
 
-- Maximum 3 review-fix cycles per sprint
+- Maximum 3 review-fix cycles per sprint; a Phase 5 delta review after convergence counts as a cycle, so with none left it escalates
 - If issues persist after 3 cycles, escalate to user with:
   - Summary of remaining issues
   - All reviewers' perspectives

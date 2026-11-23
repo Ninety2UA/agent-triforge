@@ -732,8 +732,9 @@ _persona_project_root() {
 # with the same top-tier persona (opus at max) and the same 400-line diff
 # twice: 320 s over 8 turns, and once over 900 s, where one thinking turn alone
 # took 761 s; haiku persona runs took 4 to 9 s. So the budget follows the
-# effort and the persona's own turn cap, uncapped: the two researchers' 40 turns
-# at xhigh give 8000 s, and a stuck run costs the lead no more than a persona_stop,
+# effort and the persona's own turn cap, uncapped: at xhigh the researchers'
+# 150 and 80 turns give 30000 s and 16000 s (repo mining used up to 107 turns on
+# 2026-11-23), and a stuck run costs the lead no more than a persona_stop,
 # since persona_wait returns inside its wait budget however long the run has.
 _persona_default_timeout() {
   local PER=60 T

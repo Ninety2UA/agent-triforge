@@ -4,7 +4,8 @@
 #
 # Not standalone: sourced by scripts/invoke-external.sh (the loader), inside the
 # same shell, ahead of scripts/lib/lease.sh. Runs under bash 3.2 and zsh: the
-# skill blocks that call it run under both, and it starts no python.
+# skill blocks that call it run under both, and it starts no python (the
+# delta-review helpers at the end reach it only through lease.sh's context).
 if [ -z "${_TRIFORGE_SCRIPTS_DIR:-}" ]; then
   echo "scripts/lib/gates.sh: not standalone; source scripts/invoke-external.sh" >&2
   return 2 2>/dev/null || exit 2
@@ -243,4 +244,80 @@ learnings_store_empty() {
     fi
   done
   return 0
+}
+
+# The Phase 5 delta-review trigger (at-ship and at-coordinate). A code or test
+# change after the converged review needs a non-author delta review; these two
+# functions say which paths changed, through the lead's hardened git, from the
+# lead checkout's top.
+#
+# delta_untracked_save <file>: write one "<digest> <path>" line per untracked
+# file (git ls-files --others --exclude-standard), sorted. The digest is the
+# file's git blob id (hash-object --no-filters, so no filter runs), "link:" and
+# the target for a symlink, or "unreadable". A newline in a name is written as
+# \n. An existing <file> is kept: a resumed Phase 5 compares against the list
+# its first session saved. rc 0; 1 when git fails; 64 on a bad call.
+delta_untracked_save() {
+  local OUT=${1:-}
+  if [ -z "$OUT" ]; then echo "usage: delta_untracked_save <file>" >&2; return 64; fi
+  if [ -e "$OUT" ]; then return 0; fi
+  local T
+  _lease_ctx || return 1
+  T=$(mktemp "${TMPDIR:-/tmp}/delta-save.XXXXXX") || return 1
+  _delta_untracked_list > "$T" || { rm -f "$T"; return 1; }
+  mkdir -p "$(dirname "$OUT")" && mv "$T" "$OUT" || { rm -f "$T"; return 1; }
+}
+
+# delta_review_paths <snapshot> <file>: print each changed path since the
+# converged review, one per line: every path git diff --name-only --no-renames
+# <snapshot> prints (renames off, so a file moved into an exempt path still
+# shows under its old name), and every untracked path that is new, changed or
+# gone against the <file> delta_untracked_save wrote. With no <file>, every
+# untracked path outside dot directories counts. The sprint's own bookkeeping is
+# left out: ops/STATE.md, ops/TASKS.md, ops/CHANGELOG.md, ops/MEMORY.md,
+# ops/REVIEW_*.md, ops/TEST_RESULTS.md and ops/archive/. An empty output means
+# no delta review is due. rc 0; 1 when git fails (never read as no change);
+# 3 when <snapshot> names no commit; 64 on a bad call.
+delta_review_paths() {
+  local SNAP=${1:-} BASE=${2:-} SC T RC=0
+  if [ -z "$SNAP" ] || [ -z "$BASE" ]; then echo "usage: delta_review_paths <snapshot> <file>" >&2; return 64; fi
+  case "$SNAP" in -*) echo "delta_review_paths: '$SNAP' names no commit" >&2; return 3 ;; esac
+  _lease_ctx || return 1
+  SC=$(_lgr rev-parse --verify --quiet "${SNAP}^{commit}" 2>/dev/null) || SC=""
+  if [ -z "$SC" ]; then echo "delta_review_paths: '$SNAP' names no commit" >&2; return 3; fi
+  T=$(mktemp -d "${TMPDIR:-/tmp}/delta-paths.XXXXXX") || return 1
+  # Each step writes a file and its rc is checked; nothing rests on pipefail.
+  _lgr -c core.quotePath=false diff --no-ext-diff --no-textconv --name-only --no-renames "$SC" -- > "$T/tracked" 2> "$T/err" || RC=1
+  if [ "$RC" -eq 0 ]; then _delta_untracked_list > "$T/now" 2> "$T/err" || RC=1; fi
+  if [ "$RC" -eq 0 ]; then
+    if [ -f "$BASE" ]; then
+      LC_ALL=C sort "$BASE" > "$T/base" && LC_ALL=C comm -3 "$T/now" "$T/base" > "$T/cmp" || RC=1
+      [ "$RC" -ne 0 ] || LC_ALL=C sed 's/^[[:space:]]*//; s/^[^ ]* //' "$T/cmp" > "$T/untracked" || RC=1
+    else
+      LC_ALL=C sed 's/^[^ ]* //' "$T/now" > "$T/all" && { LC_ALL=C grep -v -E '^\.|/\.' "$T/all" > "$T/untracked" || [ "$?" -eq 1 ]; } || RC=1
+    fi
+  fi
+  if [ "$RC" -ne 0 ]; then
+    echo "delta_review_paths: a git or file step failed: $(tail -1 "$T/err" 2>/dev/null)" >&2; rm -rf "$T"; return 1
+  fi
+  cat "$T/tracked" "$T/untracked" | LC_ALL=C grep -v -E '^$|^ops/(STATE|TASKS|CHANGELOG|MEMORY|TEST_RESULTS)\.md$|^ops/REVIEW_[^/]*\.md$|^ops/archive/' | LC_ALL=C sort -u || true
+  rm -rf "$T"
+  return 0
+}
+
+# _delta_untracked_list: the sorted "<digest> <path>" lines, rc 1 when git fails.
+_delta_untracked_list() {
+  local Z P D K NL='
+' ESC='\n'
+  Z=$(mktemp "${TMPDIR:-/tmp}/delta-ls.XXXXXX") || return 1
+  _lgr ls-files -z --others --exclude-standard > "$Z" || { rm -f "$Z"; return 1; }
+  # read -d '' splits on NUL under bash 3.2 and zsh alike; the keys sort bytewise.
+  while IFS= read -r -d '' P; do
+    if [ -L "$_LEASE_REPO/$P" ]; then D="link:$(readlink "$_LEASE_REPO/$P" | LC_ALL=C tr '\n ' '__')"
+    elif [ -f "$_LEASE_REPO/$P" ] && [ -r "$_LEASE_REPO/$P" ]; then D=$(_lgr hash-object --no-filters -- "$P" 2>/dev/null) || D=unreadable
+    else D=unreadable; fi
+    K=${P//$NL/$ESC}
+    printf '%s %s\n' "$D" "$K"
+  done < "$Z" | LC_ALL=C sort
+  rm -f "$Z"
 }

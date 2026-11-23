@@ -15,3 +15,6 @@ The proof each kind of claim needs, and what is commonly offered in its place. R
 | Refactor preserves behavior | The pre-refactor tests (or characterization tests) unchanged and green, and the VCS diff shows only intended changes | "The logic is equivalent"; new tests written alongside the refactor |
 | Builder completed | The VCS diff read by the lead shows the change, and the builder's final Status line parsed | The builder's prose report; a clean exit code |
 | Lint clean | The linter run on the changed files with zero findings quoted | The editor showing no warnings |
+| Gate enforced | The gate run once against a deliberate violation, exiting nonzero and naming it, then on the real tree; a tool failure or an empty or partial report counts as a failure | Exit 0; a "0 findings" summary; a printed usage message |
+| Forced edit landed | `git diff` or a re-read shows the change after the command ran; for a mutation check, the test fails while the edit is in place | The edit command exiting 0 |
+| Prompt, skill or lane change works | One live run of the changed block as shipped, quoting the host CLI, its version, the model and the transcript or report path; without that run, the claim is written `not run` | SELF rows that check the text; a stubbed lane; a run of an earlier version of the block |

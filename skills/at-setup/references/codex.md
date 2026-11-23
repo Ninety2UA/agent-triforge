@@ -6,7 +6,7 @@ Under a Codex lead this skill is invoked as `$agent-triforge:at-setup`; the walk
 
 ## Project trust
 
-Since Codex 0.147.0, `codex exec` reads the project-tier files (`.codex/hooks.json`, `.codex/config.toml`, `.codex/.rules`) only in a **trusted** project. It skips the root `AGENTS.md` only when trust is explicitly `untrusted` (D-045). Trust lives at the user tier, in `${CODEX_HOME:-~/.codex}/config.toml`:
+Since Codex 0.147.0, `codex exec` reads the project-tier files (`.codex/hooks.json`, `.codex/config.toml`, `.codex/.rules`) only in a **trusted** project. Since 0.169.0 it keeps project config, project hooks and project MCP servers off in a project that is not trusted, even with `--dangerously-bypass-hook-trust`, and it ignores a runtime override such as `-c 'projects."<path>".trust_level="trusted"'`. It skips the root `AGENTS.md` only when trust is explicitly `untrusted` (D-045). Trust lives at the user tier, in `${CODEX_HOME:-~/.codex}/config.toml`, and only the user adds it (R18):
 
 ```bash
 ROOT=$(bash "$SKILL_DIR/scripts/locate-triforge.sh") || exit $?; source "$ROOT/scripts/invoke-external.sh"; set +e
@@ -16,7 +16,7 @@ codex_trust_status | sed '1s/^/CODEX-TRUST: /'
 The first line is the state, the second says which key matched (Codex looks a project up by the path as given; Triforge also tries its physical path), and the last two are the entry the user adds:
 
 - `trusted`: the project-tier Codex files apply under `codex exec`. Nothing to do.
-- `absent`: print the `[projects."<path>"]` block for the user to add to their Codex config. Codex can write the entry itself: `codex exec -s workspace-write`, which a Codex builder runs, adds it for the repo, so this reads `trusted` after the first Codex builder. Explain what works without it: the role instructions ride as a prompt prefix, and the root `AGENTS.md` still loads (D-045). `.codex/config.toml` (memories off) and `.codex/hooks.json` are skipped until the entry exists, because `invoke_codex` never passes `--dangerously-bypass-hook-trust`, so project hooks go through Codex's own trust under `exec`.
+- `absent`: print the `[projects."<path>"]` block for the user to add to their Codex config. No Codex run adds it: a first `codex exec -s workspace-write` run, which a Codex builder makes, left the config without an entry on 0.171.0. The user may instead run `codex exec --trust` once in the project, their choice; Triforge never runs it, because it writes the user tier. Explain what works without the entry: the role instructions ride as a prompt prefix, and the root `AGENTS.md` still loads (D-045). What is skipped: Triforge's shipped `.codex/hooks.json` declares no hooks and its `.codex/config.toml` only turns Codex memories off (`use_memories`, `generate_memories`), so an untrusted project loses those memory settings and Codex's own memory pipeline runs beside `ops/MEMORY.md`; anything the project added to those files, and its project MCP servers, are skipped as well.
 - `untrusted`: the user marked the project untrusted, so Codex skips the root `AGENTS.md` as well, and neither a Codex lead nor a Codex worker sees the pointer block. Say so; changing it is the user's call.
 - `unknown` (rc 80): the config could not be read or parsed, or no TOML parser is installed. Report it as printed; setup continues.
 

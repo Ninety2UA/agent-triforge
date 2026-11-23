@@ -6,7 +6,7 @@ Before validating the plan, surface the critical assumptions:
 
 1. List the 3 most critical assumptions about the goal that, if wrong, would invalidate the plan.
 2. For each: what was assumed, the alternative interpretation, and the impact if wrong (which tasks would change).
-3. Present them to the user and ask for confirmation or correction.
+3. Present them to the user and ask for confirmation or correction. When no user is answering (a `coordinate.sh` iteration, a headless run), do not stall: take the reading that keeps the most options open, record `Ruling: assumed <reading> — <reason>` in `ops/CHANGELOG.md`, and go on; stop only where the assumption meets one of the `wave-orchestration` skill's four hard stops.
 4. A corrected assumption means revising `ops/TASKS.md` before validation.
 5. All confirmed means proceeding to Phase 1.5.
 

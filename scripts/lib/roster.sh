@@ -27,10 +27,10 @@ fi
 _ROLE_DEFAULTS_PY='
 DEFAULTS = {
     "builder":    {"cli": "claude",      "model": "",                        "effort": "max",   "fallbacks": ["codex", "antigravity"]},
-    "reviewer":   {"cli": "codex",       "model": "gpt-6-astra",             "effort": "xhigh", "fallbacks": ["antigravity", "claude"]},
-    "tester":     {"cli": "codex",       "model": "gpt-6-astra",             "effort": "xhigh", "fallbacks": ["claude"]},
-    "analyst":    {"cli": "antigravity", "model": "Gemini 3.8 Flash (High)", "effort": "high",  "fallbacks": ["claude"]},
-    "documenter": {"cli": "antigravity", "model": "Gemini 3.8 Flash (High)", "effort": "high",  "fallbacks": ["claude"]},
+    "reviewer":   {"cli": "codex",       "model": "gpt-6.2-astra",           "effort": "xhigh", "fallbacks": ["antigravity", "claude"]},
+    "tester":     {"cli": "codex",       "model": "gpt-6.2-astra",           "effort": "xhigh", "fallbacks": ["claude"]},
+    "analyst":    {"cli": "antigravity", "model": "Gemini 4 Neon (High)",    "effort": "high",  "fallbacks": ["claude"]},
+    "documenter": {"cli": "antigravity", "model": "Gemini 4 Neon (High)",    "effort": "high",  "fallbacks": ["claude"]},
 }
 '
 
@@ -216,8 +216,10 @@ for idx, cli in enumerate(chain):
     if entry['user_effort'] and not entry['user_model'] and isinstance(model, str):
         e = str(entry['effort'])
         if cli == 'antigravity':
-            fam = re.sub(r'\s*\((Low|Medium|High)\)\s*$', '', model)
-            sfx = {'low': 'Low', 'medium': 'Medium'}.get(e, 'High')
+            fam = re.sub(r'\s*\((Low|Medium|High|XHigh)\)\s*$', '', model)
+            sfx = {'low': 'Low', 'medium': 'Medium', 'xhigh': 'XHigh', 'max': 'XHigh'}.get(e, 'High')
+            if sfx == 'XHigh' and fam not in ('Gemini 4 Neon', 'Gemini 4 Hydrogen'):
+                sfx = 'High'                    # (XHigh) exists only for Neon and Hydrogen
             if sfx == 'Medium' and '3.1 Pro' in fam:
                 sfx = 'Low'                     # the 3.1 Pro line has no (Medium)
             model = fam + ' (' + sfx + ')'
@@ -320,7 +322,7 @@ dispatch_role() {
       # the roster model and effort ride the CODEX_MODEL / CODEX_EFFORT
       # overrides (same pattern as the other lanes) so a [roles.*] model or
       # effort customization reaches `codex exec -m` / -c model_reasoning_effort.
-      # The shipped defaults (gpt-6-astra, xhigh) match the agents.toml pins, so
+      # The shipped defaults (gpt-6.2-astra, xhigh) match the agents.toml pins, so
       # this is a no-op until a user actually customizes the role.
       CODEX_MODEL="$MODEL" CODEX_EFFORT="$EFFORT" invoke_codex "$AGENT_NAME" "$PROMPT" "$OUTPUT_FILE" "$TIMEOUT"
       ;;
@@ -1811,8 +1813,10 @@ if ('model' not in user and str(entry['cli']) != DEFAULTS[role]['cli']) or not e
 if 'effort' in user and 'model' not in user and isinstance(entry['model'], str):
     e = str(entry['effort']); cli = str(entry['cli']); model = entry['model']
     if cli == 'antigravity':
-        fam = re.sub(r'\s*\((Low|Medium|High)\)\s*$', '', model)
-        sfx = {'low': 'Low', 'medium': 'Medium'}.get(e, 'High')
+        fam = re.sub(r'\s*\((Low|Medium|High|XHigh)\)\s*$', '', model)
+        sfx = {'low': 'Low', 'medium': 'Medium', 'xhigh': 'XHigh', 'max': 'XHigh'}.get(e, 'High')
+        if sfx == 'XHigh' and fam not in ('Gemini 4 Neon', 'Gemini 4 Hydrogen'):
+            sfx = 'High'
         if sfx == 'Medium' and '3.1 Pro' in fam:
             sfx = 'Low'
         entry['model'] = fam + ' (' + sfx + ')'
@@ -1940,37 +1944,41 @@ def refuse(msg):
 members = roster.get('members', {})
 member_rules(members if isinstance(members, dict) else {}, {role: chain}, refuse)
 
-# agy's effort control IS the (Low)/(Medium)/(High) model-variant suffix (see
-# the roster template header): normalize the written pair so it cannot
-# contradict itself — dispatch passes only the model string, so a mismatched
-# suffix would silently win over effort. Three-state map (a behavior change
-# from v3.1, which collapsed medium to (Low)): low -> (Low), medium ->
-# (Medium), high/xhigh/max -> (High). Families without a (Medium) variant
-# (3.1 Pro: agy lists only (Low)/(High)) collapse medium to (Low) with a NOTE.
-# An EMPTY agy model is auto-filled with the effort-matched shipped default
-# (Gemini 3.8 Flash (<want>) — D-022, D-060: newest Gemini at its highest
-# thinking level that every tier can run); otherwise the empty model falls back to the (High)
-# default at dispatch and a low/medium effort is silently lost. Models without
-# a variant suffix are written through untouched, no note. This block runs
-# AFTER every rejecting check above so its stderr NOTE is only ever emitted on
-# a path that reaches the write.
+# agy's effort control IS the (Low)/(Medium)/(High)/(XHigh) model-variant
+# suffix (see the roster template header): normalize the written pair so it
+# cannot contradict itself — dispatch passes only the model string, so a
+# mismatched suffix would silently win over effort. Map: low -> (Low), medium
+# -> (Medium), high -> (High), xhigh/max -> (XHigh) on the families agy lists
+# with an (XHigh) variant (Gemini 4 Neon and Hydrogen) and (High) elsewhere.
+# Families without a (Medium) variant (3.1 Pro: agy lists only (Low)/(High))
+# collapse medium to (Low) with a NOTE. An EMPTY agy model is auto-filled with
+# the effort-matched shipped default (Gemini 4 Neon (<want>) — D-085: the
+# newest Gemini; on an account without it, dispatch runs the next listed
+# Gemini 4 model or Gemini 3.8 Flash, _agy_model_for_account); otherwise the empty model falls
+# back to the (High) default at dispatch and the effort is silently lost.
+# Models without a variant suffix are written through untouched, no note.
+# This block runs AFTER every rejecting check above so its stderr NOTE is only
+# ever emitted on a path that reaches the write.
 if cli == 'antigravity':
-    want = {'low': 'Low', 'medium': 'Medium'}.get(effort, 'High')
+    want = {'low': 'Low', 'medium': 'Medium', 'xhigh': 'XHigh', 'max': 'XHigh'}.get(effort, 'High')
     NO_MEDIUM = ('Gemini 3.1 Pro',)   # families agy lists without a (Medium) variant
+    HAS_XHIGH = ('Gemini 4 Neon', 'Gemini 4 Hydrogen')   # families agy lists with an (XHigh) variant
     if not model:
-        model = 'Gemini 3.8 Flash (' + want + ')'
-        sys.stderr.write('roster_write_role: NOTE empty agy model auto-filled with the effort-matched pin ' + repr(model) + ' (agy effort rides in the (Low)/(Medium)/(High) suffix)\n')
+        model = 'Gemini 4 Neon (' + want + ')'
+        sys.stderr.write('roster_write_role: NOTE empty agy model auto-filled with the effort-matched pin ' + repr(model) + ' (agy effort rides in the (Low)/(Medium)/(High)/(XHigh) suffix)\n')
     else:
-        m2 = re.match(r'^(.*?)\s*\((High|Medium|Low)\)$', model)
+        m2 = re.match(r'^(.*?)\s*\((XHigh|High|Medium|Low)\)$', model)
         if m2:
             family = m2.group(1).strip()
             eff_want = want
+            if eff_want == 'XHigh' and family not in HAS_XHIGH:
+                eff_want = 'High'
             if eff_want == 'Medium' and family in NO_MEDIUM:
                 eff_want = 'Low'
                 sys.stderr.write('roster_write_role: NOTE ' + family + ' has no (Medium) variant — medium effort maps to (Low)\n')
             if m2.group(2) != eff_want:
                 model = family + ' (' + eff_want + ')'
-                sys.stderr.write('roster_write_role: NOTE agy effort maps into the (Low)/(Medium)/(High) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
+                sys.stderr.write('roster_write_role: NOTE agy effort maps into the (Low)/(Medium)/(High)/(XHigh) model suffix — model normalized to ' + repr(model) + ' to match effort=' + effort + '\n')
 
 # Cursor's effort control is likewise a model-id SUFFIX (D-025, CUR-10/12):
 # grok-4.7-low|medium|high|xhigh, cursor-grok-4.6-low|…. A bare Grok family

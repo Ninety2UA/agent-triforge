@@ -77,9 +77,10 @@ fi
 # while the builder opt-in is on record (a lease created before it was removed
 # included).
 #
-# Model: --model "${DEVIN_MODEL:-swe-1-6-slow}" on every call. swe-1-6-slow is
-# Cognition's own model and what a Devin Free account resolves to; Free
-# refuses most others with "Upgrade to Pro" (a deterministic plan failure). A
+# Model: --model "${DEVIN_MODEL:-swe-2-flash-medium}" on every call.
+# swe-2-flash-medium is Cognition's newest model a Devin Free account runs
+# (D-085; READY on 3000.11.234, 2026-11-23); Free refuses swe-2-high, swe-2-max
+# and most others with "Upgrade to Pro" (a deterministic plan failure). A
 # paid account can pin any `devin models list` id through the roster model.
 # Devin has no effort flag; effort rides in some model ids (swe-2-high,
 # swe-2-max) and is otherwise recorded for roster parity only.
@@ -330,8 +331,8 @@ _devin_auth_ready() {
 # digits, . _ : / -) is skipped, since it lands in the roster and on Devin's
 # command line. What setup offers for [members.devin] model, which
 # roster_write_member devin true <id> records and every Devin role then runs
-# (resolve_role); swe-1-6-slow, the registry model, stays the shipped pin, the
-# one a Free account runs. Read-only, 30 s cap. rc 69, nothing on stdout and
+# (resolve_role); swe-2-flash-medium, the registry model, stays the shipped
+# pin, the newest one a Free account runs. Read-only, 30 s cap. rc 69, nothing on stdout and
 # the reason on stderr, when devin is not on PATH, the call fails (signed
 # out, no network) or it lists no model.
 devin_model_choices() {
@@ -447,7 +448,7 @@ invoke_devin() {
   local OUTPUT_FILE=${3:-"${TMPDIR:-/tmp}/devin_output_$$_$(date +%s).txt"}
   local TIMEOUT=${4:-600}
   local EFFORT=${5:-${DEVIN_EFFORT:-}}
-  local MODEL="${DEVIN_MODEL:-swe-1-6-slow}"
+  local MODEL="${DEVIN_MODEL:-swe-2-flash-medium}"
   local ROLE=${DEVIN_ROLE:-$AGENT_NAME}
   local ERR="${OUTPUT_FILE}.err" CLASS MODE BRIEF_FILE="" BODY="" FULL_PROMPT CFG="" EXIT_CODE=0 ATTEMPT=1 TOBIN CRC=0
 

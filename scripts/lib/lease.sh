@@ -2721,6 +2721,9 @@ You are working in an isolated worktree at ${WT}. Never modify files outside it.
 - Do not spawn sub-agents, delegate, or invoke other coding tools; do the work yourself in this worktree.
 - Never run git push, git pull, or git fetch. Do not commit, rebase, or switch branches.
 - Do not end your final turn while a command you started in the background is still running: wait for it or stop it first.
+- Check your work with the commands and tools the project already declares. Do not install a test runner, type checker, linter or other package only to verify; if the project has none, say so on the Tests line and name what you ran instead.
+- Never discard work in this worktree: no git reset --hard, git stash, git clean, git restore or git checkout -- <path>. To undo your own edit, edit the file back. Deleting a file is fine when the task requires it. A refused or failed step stops only what depends on it; finished work stays in place.
+- Other runs share this machine: never stop or signal a process you did not start (no pkill, killall, or kill by name or pattern).
 - Finish with a final report in exactly this shape (the lead parses the Status line; a run without it is treated as incomplete):
   Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
   Files changed: <list>
@@ -2774,6 +2777,11 @@ ${PROMPT}"
       ;;
     kimi)
       [ -f "${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md" ] && LANE_ARG="${_TRIFORGE_PLUGIN_ROOT}/kimi-agents/builder.md"
+      ;;
+    antigravity)
+      # a paid-plan Gemini this account's agy does not list runs as the next
+      # listed one (D-085), resolved here so dispatched_model names it
+      DISPATCH_MODEL=$(_agy_model_for_account "$DISPATCH_MODEL")
       ;;
     cursor)
       DISPATCH_MODEL=$(_cursor_model_for_effort "$DISPATCH_MODEL" "$EFFORT")

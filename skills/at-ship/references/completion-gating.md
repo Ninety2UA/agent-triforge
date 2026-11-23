@@ -6,12 +6,13 @@ The sprint's completion condition is this checklist; ALL items must hold:
 2. The `verification-before-completion` checklist passes with evidence.
 3. `ops/STATE.md` is written for session handoff.
 4. Temporary review files are archived to `ops/archive/`.
-5. The runtime marker `ops/.sprint-complete` is created LAST, only after 1–4 hold.
+5. Every code or test change made after the converged review (since the snapshot that cycle reviewed) is covered by a delta review from a roster member that wrote none of it, counted against the three-cycle cap. Test files have no exemption.
+6. The runtime marker `ops/.sprint-complete` is created LAST, only after 1–5 hold.
 
 At sprint start, print this copyable line for the user. A skill cannot invoke it itself: under a Claude Code lead it is user-typed, or the leading line of a headless prompt. `/goal` is an assist (CC-03 went 0 of 3 on 2.1.318) and `ops/.sprint-complete` plus `coordinate.sh` decide completion. A Codex lead has no `/goal` and completes on the sentinel alone (KTD14), so for a Codex lead the line is the standing checklist, printed for the record.
 
 ```
-/goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; ops/.sprint-complete is created last.
+/goal Sprint complete ONLY when ALL of: every phase is done or explicitly skipped with a stated reason; the verification-before-completion checklist passes with evidence; ops/STATE.md is written; review files are archived to ops/archive/; every code or test change since the converged review's snapshot has a non-author delta review; ops/.sprint-complete is created last.
 ```
 
 Whether or not the user types it, hold yourself to that checklist as your completion condition. Create `ops/.sprint-complete` ONLY in Phase 6 after the checklist passes, never earlier. Outer tooling (`$ROOT/scripts/coordinate.sh`) detects sprint completion solely by that file's existence; the marker is gitignored and never committed.

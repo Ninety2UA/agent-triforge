@@ -76,7 +76,7 @@ The lead reads this report through `persona_verdict`, which rejects any other sh
 
 You may iterate up to 3 times:
 1. Review plan → report issues
-2. (Claude fixes) → re-review → report remaining issues
-3. (Claude fixes) → final review → approve or escalate
+2. (the lead fixes) → re-review → report remaining issues
+3. (the lead fixes) → final review → approve or escalate
 
 After 3 iterations, escalate to the user with the remaining blocking issues.

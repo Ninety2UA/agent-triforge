@@ -154,7 +154,7 @@ invoke_codex() {
   # earlier answer survives one that writes none. ${OUTPUT_FILE} is the whole
   # session, tool output included, so the final answer is what a caller
   # judges (at-review's promotion reads its Status line there). -o is older
-  # than the Codex floor, 0.153.0 (CDX-05 ran it on 0.144.4).
+  # than the Codex floor, 0.166.0 (CDX-05 ran it on 0.144.4).
   # BASE_CMD carries everything retry-safe (model pin, sandbox, approval, -o).
   # Schema flags are first-attempt only: a schema-caused rejection
   # (e.g. 400 invalid_json_schema) would fail identically on retry, so the
